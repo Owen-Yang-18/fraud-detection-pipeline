@@ -392,7 +392,7 @@ def load_model(model_dir: str,
                       n_layers=hyperparameters['n_layers'],
                       embedding_size=hyperparameters['embedding_size'],
                       target=hyperparameters['target_node']).to(device)
-    model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pt'), weights_only=False))
+    model.load_state_dict(torch.load(os.path.join(model_dir, 'model.pt'), weights_only=True))
 
     return model, graph, hyperparameters
 
