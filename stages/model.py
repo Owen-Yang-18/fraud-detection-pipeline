@@ -495,23 +495,23 @@ def visualize_graph(train_data: cf.DataFrame, col_drop: list[str], partition: st
     plt.figure(figsize=(10, 8))
     nx.draw_networkx_nodes(
         nx_g, pos,
-        node_size=20,
+        node_size=10,
         node_color=node_colors,
-        linewidths=0.5
+        linewidths=1
     )
     nx.draw_networkx_edges(
         nx_g, pos,
         edge_color=edge_colors,
-        width=0.5,
+        width=1,
         alpha=0.8,
         arrows=False
     )
 
     # 9. Legend
     for ntype, color in node_color_map.items():
-        plt.scatter([], [], c=color, s=20, label=ntype)
+        plt.scatter([], [], c=color, s=10, label=ntype)
     for rel, color in edge_color_map.items():
-        plt.plot([], [], color=color, linewidth=0.5, label=rel)
+        plt.plot([], [], color=color, linewidth=1, label=rel)
     plt.legend(frameon=False, title="Types")
 
     # 10. Save
