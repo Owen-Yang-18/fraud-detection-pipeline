@@ -468,7 +468,7 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
     node_colors = [node_color_map[ntype['ntype']] for _, ntype in nx_g.nodes(data=True)]
 
     # 7. Edge colors by relation
-    edge_color_map = {'buys':'red','bought':'blue','issued':'green','sells':'purple'}
+    edge_color_map = {'buy':'red','bought':'blue','issued':'green','sell':'purple'}
     edge_colors = [edge_color_map[data['etype'][1]] for _, _, data in nx_g.edges(data=True)]
 
     # 8. Layout & plot
