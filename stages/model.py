@@ -26,7 +26,7 @@ class BaseHeteroGraph(nn.Module):
         self._target = target
 
         # categorical embedding for all non-target node types
-        self.hetero_embedding = dglnn.HeteroEmbedding(
+        self.hetro_embedding = dglnn.HeteroEmbedding(
             {ntype: input_graph.number_of_nodes(ntype)
              for ntype in input_graph.ntypes if ntype != self._target},
             embedding_size
@@ -49,9 +49,9 @@ class BaseHeteroGraph(nn.Module):
         first = blocks[0] if isinstance(blocks, list) else blocks
 
         # get initial embeddings for non-target types
-        h_dict = self.hetero_embedding({
+        h_dict = self.hetro_embedding({
             ntype: first.nodes[ntype].data[dgl.NID]
-            for ntype in self.hetero_embedding.embeds.keys()
+            for ntype in self.hetro_embedding.embeds.keys()
         })
 
         # assign raw features for target node type
