@@ -464,43 +464,38 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
     )
 
     # 6. Node colors by type
-    node_color_map = {
-        'client':      'skyblue',
-        'merchant':    'orange',
-        'transaction': 'pink'
-    }
-    node_colors = []
-    for ntype, nid in nx_g.nodes(data='_ID'):
-        node_colors.append(node_color_map[ntype])
+    node_color_map = {'client':'skyblue', 'merchant':'orange','transaction':'pink'}
+    node_colors = [node_color_map[ntype['ntype']] for _, ntype in nx_g.nodes(data=True)]
 
     # 7. Edge colors by relation
-    edge_color_map = {
-        'buys':   'red',
-        'bought': 'blue',
-        'issued': 'green',
-        'sells':  'purple'
-    }
-    edge_colors = []
-    for u, v, data in nx_g.edges(data=True):
-        # data['etype'] is a tuple: (src_type, rel_type, dst_type)
-        rel = data['etype'][1]
-        edge_colors.append(edge_color_map.get(rel, 'gray'))
+    edge_color_map = {'buys':'red','bought':'blue','issued':'green','sells':'purple'}
+    edge_colors = [edge_color_map[data['etype'][1]] for _, _, data in nx_g.edges(data=True)]
 
-    # 8. Draw graph
+    # 8. Layout & plot
     pos = nx.spring_layout(nx_g, seed=42)
     plt.figure(figsize=(10, 8))
-    nx.draw_networkx_nodes(nx_g, pos, node_color=node_colors, node_size=100)
-    nx.draw_networkx_edges(nx_g, pos, edge_color=edge_colors, arrows=True, arrowstyle='-|>', arrowsize=10)
-    # No labels for clarity
+    nx.draw_networkx_nodes(
+        nx_g, pos,
+        node_size=20,
+        node_color=node_colors,
+        linewidths=0.5
+    )
+    nx.draw_networkx_edges(
+        nx_g, pos,
+        edge_color=edge_colors,
+        width=0.5,
+        alpha=0.8,
+        arrows=False
+    )
 
-    # Legend
+    # 9. Legend
     for ntype, color in node_color_map.items():
-        plt.scatter([], [], c=color, label=ntype, s=100)
+        plt.scatter([], [], c=color, s=20, label=ntype)
     for rel, color in edge_color_map.items():
-        plt.plot([], [], color=color, label=rel)
-    plt.legend(scatterpoints=1, frameon=False, title="Node / Edge Types")
+        plt.plot([], [], color=color, linewidth=0.5, label=rel)
+    plt.legend(frameon=False, title="Types")
 
-    # Save (use bbox_inches to include legend)
+    # 10. Save
     plt.savefig("heterograph.png", dpi=300, bbox_inches='tight')
     plt.close()
 
