@@ -1,0 +1,21 @@
+name: gnn-fraud           # Name of the Conda environment
+channels:
+  - rapidsai              # NVIDIA RAPIDS packages (cuDF, etc.) :contentReference[oaicite:0]{index=0}
+  - conda-forge           # Community-driven packages (pandas, xgboost) :contentReference[oaicite:1]{index=1}
+  - nvidia                # NVIDIA CUDA toolkit :contentReference[oaicite:2]{index=2}
+  - dglteam               # DGL heterogeneous graph library :contentReference[oaicite:3]{index=3}
+  - pytorch               # PyTorch and related packages :contentReference[oaicite:4]{index=4}
+
+dependencies:
+  - python=3.10                          # Python version :contentReference[oaicite:5]{index=5}
+  - cudatoolkit=11.8                     # CUDA runtime for GPU acceleration :contentReference[oaicite:6]{index=6}
+  - cudf=23.06                           # GPU DataFrame library (cuDF) :contentReference[oaicite:7]{index=7}
+  - dgl-cuda11.8                         # DGL with CUDA 11.8 support :contentReference[oaicite:8]{index=8}
+  - pytorch=2.0.1                        # Core deep-learning framework :contentReference[oaicite:9]{index=9}
+  - numpy                                # Numerical computing library :contentReference[oaicite:10]{index=10}
+  - pandas                               # Tabular data I/O and manipulation :contentReference[oaicite:11]{index=11}
+  - xgboost                              # Gradient boosting classifier :contentReference[oaicite:12]{index=12}
+  - click                                # Command-line interface parsing
+  - pip                                  # To allow pip installs if needed
+  - pip:
+    - dgl                                 # Ensure the latest DGL via PyPI if conda package missing :contentReference[oaicite:13]{index=13}
