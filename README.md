@@ -1,2 +1,2 @@
-# fraud-detection-pipeline
-Temporary repository for GNN Fraud Detection
+# read-only
+My own repository for GNN Fraud Detection
