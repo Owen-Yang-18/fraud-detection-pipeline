@@ -457,7 +457,7 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
 
      # 4. Visualize with NetworkX & Matplotlib
     #    Convert to NetworkX MultiDiGraph with edge attribute 'etype'
-    nx_g = dgl.to_networkx(graph, node_attrs=['n'], edge_attrs=['e']).cpu()
+    nx_g = dgl.to_networkx(graph.cpu(), node_attrs=['n'], edge_attrs=['e'])
 
     # Map each relation to a distinct color
     relation_colors = {
