@@ -10,7 +10,6 @@ dependencies:
   - python=3.10                          # Python version :contentReference[oaicite:5]{index=5}
   - cudatoolkit=11.8                     # CUDA runtime for GPU acceleration :contentReference[oaicite:6]{index=6}
   - cudf=23.06                           # GPU DataFrame library (cuDF) :contentReference[oaicite:7]{index=7}
-  - dgl-cuda11.8                         # DGL with CUDA 11.8 support :contentReference[oaicite:8]{index=8}
   - pytorch=2.0.1                        # Core deep-learning framework :contentReference[oaicite:9]{index=9}
   - numpy                                # Numerical computing library :contentReference[oaicite:10]{index=10}
   - pandas                               # Tabular data I/O and manipulation :contentReference[oaicite:11]{index=11}
