@@ -455,6 +455,25 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
     }
     graph = dgl.heterograph(edge_list)
 
+    return graph, feature_tensors
+
+
+def visualize_graph(train_data: cf.DataFrame, col_drop: list[str], partition: str):
+    client_tensor, merchant_tensor, transaction_tensor = torch.tensor_split(
+        torch.from_dlpack(train_data[col_drop].values.toDlpack()).long(), 3, dim=1)
+
+    client_tensor, merchant_tensor, transaction_tensor = (client_tensor.view(-1),
+                                                          merchant_tensor.view(-1),
+                                                          transaction_tensor.view(-1))
+
+    edge_list = {
+        ('client', 'buy', 'transaction'): (client_tensor, transaction_tensor),
+        ('transaction', 'bought', 'client'): (transaction_tensor, client_tensor),
+        ('transaction', 'issued', 'merchant'): (transaction_tensor, merchant_tensor),
+        ('merchant', 'sell', 'transaction'): (merchant_tensor, transaction_tensor)
+    }
+    graph = dgl.heterograph(edge_list)
+
     # 4. CPU copy for visualization
     graph_cpu = graph.to('cpu')
 
@@ -496,10 +515,8 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
     plt.legend(frameon=False, title="Types")
 
     # 10. Save
-    plt.savefig("heterograph.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"heterograph-{partition}.png", dpi=300, bbox_inches='tight')
     plt.close()
-
-    return graph, feature_tensors
 
 
 def prepare_data(

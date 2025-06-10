@@ -1,9 +1,7 @@
-# stages/graph_construction_stage.py
+import cudf
+import torch
 
-import cudf                                                  # for GPU DataFrame I/O :contentReference[oaicite:0]{index=0}
-import torch                                                 # for tensor operations and DLPack conversion :contentReference[oaicite:1]{index=1}
-
-from .model import prepare_data, build_fsi_graph
+from .model import prepare_data, build_fsi_graph, visualize_graph
 
 def construct_fraud_graph(
     training_csv: str,
@@ -30,7 +28,26 @@ def construct_fraud_graph(
     graph, node_features = build_fsi_graph(
         combined,
         col_drop=['client_node', 'merchant_node', 'index']
-    )  # uses dgl.heterograph internally :contentReference[oaicite:2]{index=2}
+    )
+
+    # Visualize the graph structure
+    visualize_graph(
+        train_part,
+        col_drop=['client_node', 'merchant_node', 'index'],
+        partition="train"
+    )
+
+    visualize_graph(
+        infer_part,
+        col_drop=['client_node', 'merchant_node', 'index'],
+        partition="infer"
+    )
+
+    visualize_graph(
+        combined,
+        col_drop=['client_node', 'merchant_node', 'index'],
+        partition="combined"
+    )
 
     # Convert test indices from cuDF to torch.LongTensor via DLPack
     test_index = torch.from_dlpack(infer_idx.values.toDlpack()).long()
