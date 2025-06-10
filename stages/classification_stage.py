@@ -55,8 +55,6 @@ class ClassificationStage:
         # 3. Optional XGBoost classifier on embeddings
         xgb_path = os.path.join(self.model_dir, "xgb.pt")
         if os.path.exists(xgb_path):
-            # with open(xgb_path, "rb") as f:
-            #     xgb_model = pickle.load(f)
             xgb_model = cuml.ForestInference.load(xgb_path, output_class=True, model_type="xgboost")  # cuml ForestInference for XGBoost
             # assumes scikit-learn API
             scores = xgb_model.predict_proba(embeddings)[:, 1]

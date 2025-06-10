@@ -8,6 +8,8 @@ import torch
 from dgl import nn as dglnn
 from torch import nn
 from torch.nn import functional as F
+import networkx as nx
+import matplotlib.pyplot as plt
 
 import cudf as cf
 
@@ -396,7 +398,6 @@ def load_model(model_dir: str,
 
     return model, graph, hyperparameters
 
-
 def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHeteroGraph, torch.Tensor):
     """Build a heterogeneous graph from an edgelist and node index.
     Parameters
@@ -453,6 +454,42 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
         ('merchant', 'sell', 'transaction'): (merchant_tensor, transaction_tensor)
     }
     graph = dgl.heterograph(edge_list)
+
+     # 4. Visualize with NetworkX & Matplotlib
+    #    Convert to NetworkX MultiDiGraph with edge attribute 'etype'
+    nx_g = dgl.to_networkx(graph, as_multigraph=True, edge_attrs=['etype'])
+
+    # Map each relation to a distinct color
+    relation_colors = {
+        'buys':    'red',
+        'bought':  'blue',
+        'issued':  'green',
+        'sells':   'orange'
+    }
+    edge_colors = []
+    for u, v, data in nx_g.edges(data=True):
+        rel = data['etype'][1]   # data['etype'] is a tuple (src, rel, dst)
+        edge_colors.append(relation_colors.get(rel, 'black'))
+
+    # Compute layout and draw
+    pos = nx.spring_layout(nx_g, seed=42)
+    plt.figure(figsize=(10, 8))
+    nx.draw(
+        nx_g,
+        pos,
+        with_labels=True,
+        node_size=100,
+        edge_color=edge_colors,
+        font_size=6
+    )
+    # Add legend for relations
+    for rel, color in relation_colors.items():
+        plt.plot([], [], color=color, label=rel)
+    plt.legend(title="Edge types")
+    plt.title("Heterogeneous Graph: client–transaction–merchant")
+    plt.tight_layout()
+    plt.savefig("hetero_graph.png", dpi=300)
+    plt.close()
 
     return graph, feature_tensors
 
