@@ -455,40 +455,53 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
     }
     graph = dgl.heterograph(edge_list)
 
-     # 4. Visualize with NetworkX & Matplotlib
-    #    Convert to NetworkX MultiDiGraph with edge attribute 'etype'
-    nx_g = dgl.to_networkx(graph.cpu(), node_attrs=['n'], edge_attrs=['e'])
+    # 4. CPU copy for visualization
+    graph_cpu = graph.to('cpu')
 
-    # Map each relation to a distinct color
-    relation_colors = {
-        'buys':    'red',
-        'bought':  'blue',
-        'issued':  'green',
-        'sells':   'orange'
+    # 5. Convert to NetworkX, including edge types
+    nx_g = dgl.to_networkx(
+        graph_cpu
+    )
+
+    # 6. Node colors by type
+    node_color_map = {
+        'client':      'skyblue',
+        'merchant':    'orange',
+        'transaction': 'pink'
+    }
+    node_colors = []
+    for ntype, nid in nx_g.nodes(data='_ID'):
+        node_colors.append(node_color_map[ntype])
+
+    # 7. Edge colors by relation
+    edge_color_map = {
+        'buys':   'red',
+        'bought': 'blue',
+        'issued': 'green',
+        'sells':  'purple'
     }
     edge_colors = []
     for u, v, data in nx_g.edges(data=True):
-        rel = data['etype'][1]   # data['etype'] is a tuple (src, rel, dst)
-        edge_colors.append(relation_colors.get(rel, 'black'))
+        # data['etype'] is a tuple: (src_type, rel_type, dst_type)
+        rel = data['etype'][1]
+        edge_colors.append(edge_color_map.get(rel, 'gray'))
 
-    # Compute layout and draw
+    # 8. Draw graph
     pos = nx.spring_layout(nx_g, seed=42)
     plt.figure(figsize=(10, 8))
-    nx.draw(
-        nx_g,
-        pos,
-        with_labels=True,
-        node_size=100,
-        edge_color=edge_colors,
-        font_size=6
-    )
-    # Add legend for relations
-    for rel, color in relation_colors.items():
+    nx.draw_networkx_nodes(nx_g, pos, node_color=node_colors, node_size=100)
+    nx.draw_networkx_edges(nx_g, pos, edge_color=edge_colors, arrows=True, arrowstyle='-|>', arrowsize=10)
+    # No labels for clarity
+
+    # Legend
+    for ntype, color in node_color_map.items():
+        plt.scatter([], [], c=color, label=ntype, s=100)
+    for rel, color in edge_color_map.items():
         plt.plot([], [], color=color, label=rel)
-    plt.legend(title="Edge types")
-    plt.title("Heterogeneous Graph: client–transaction–merchant")
-    plt.tight_layout()
-    plt.savefig("hetero_graph.png", dpi=300)
+    plt.legend(scatterpoints=1, frameon=False, title="Node / Edge Types")
+
+    # Save (use bbox_inches to include legend)
+    plt.savefig("heterograph.png", dpi=300, bbox_inches='tight')
     plt.close()
 
     return graph, feature_tensors
