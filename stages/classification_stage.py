@@ -69,7 +69,7 @@ class ClassificationStage:
         # 4. Assemble output DataFrame and write CSV
         df_infer = cudf.read_csv(infer_csv)
         df_out = cudf.DataFrame({
-            "transaction_id": df_infer.iloc[test_idx].to_pandas().values,
+            "transaction_id": df_infer["index"].iloc[test_idx].to_pandas().values,
             "fraud_score":    scores
         })
         df_out.to_csv(output_csv, index=False)
