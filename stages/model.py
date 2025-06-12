@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from pyvis.network import Network
 
 import cudf as cf
+import pandas as pd
 
 
 class BaseHeteroGraph(nn.Module):
@@ -458,68 +459,6 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
 
     return graph, feature_tensors
 
-'''
-def visualize_graph(train_data: cf.DataFrame, col_drop: list[str], partition: str):
-    client_tensor, merchant_tensor, transaction_tensor = torch.tensor_split(
-        torch.from_dlpack(train_data[col_drop].values.toDlpack()).long(), 3, dim=1)
-
-    client_tensor, merchant_tensor, transaction_tensor = (client_tensor.view(-1),
-                                                          merchant_tensor.view(-1),
-                                                          transaction_tensor.view(-1))
-
-    edge_list = {
-        ('client', 'buy', 'transaction'): (client_tensor, transaction_tensor),
-        ('transaction', 'bought', 'client'): (transaction_tensor, client_tensor),
-        ('transaction', 'issued', 'merchant'): (transaction_tensor, merchant_tensor),
-        ('merchant', 'sell', 'transaction'): (merchant_tensor, transaction_tensor)
-    }
-    graph = dgl.heterograph(edge_list)
-
-    # 4. CPU copy for visualization
-    graph_cpu = graph.to('cpu')
-
-    # 5. Convert to NetworkX, including edge types
-    nx_g = dgl.to_networkx(
-        graph_cpu
-    )
-
-    # 6. Node colors by type
-    node_color_map = {'client':'skyblue', 'merchant':'orange','transaction':'pink'}
-    node_colors = [node_color_map[ntype['ntype']] for _, ntype in nx_g.nodes(data=True)]
-
-    # 7. Edge colors by relation
-    edge_color_map = {'buy':'red','bought':'blue','issued':'green','sell':'purple'}
-    edge_colors = [edge_color_map[data['etype'][1]] for _, _, data in nx_g.edges(data=True)]
-
-    # 8. Layout & plot
-    pos = nx.spring_layout(nx_g, seed=42)
-    plt.figure(figsize=(10, 8))
-    nx.draw_networkx_nodes(
-        nx_g, pos,
-        node_size=10,
-        node_color=node_colors,
-        linewidths=1
-    )
-    nx.draw_networkx_edges(
-        nx_g, pos,
-        edge_color=edge_colors,
-        width=1,
-        alpha=0.8,
-        arrows=False
-    )
-
-    # 9. Legend
-    for ntype, color in node_color_map.items():
-        plt.scatter([], [], c=color, s=10, label=ntype)
-    for rel, color in edge_color_map.items():
-        plt.plot([], [], color=color, linewidth=1, label=rel)
-    plt.legend(frameon=False, title="Types")
-
-    # 10. Save
-    plt.savefig(f"heterograph-{partition}.png", dpi=300, bbox_inches='tight')
-    plt.close()
-'''
-
 def visualize_graph(
     train_data: cf.DataFrame,
     col_drop: list[str],
@@ -529,6 +468,31 @@ def visualize_graph(
     Build a DGL heterograph, then create an interactive directed
     PyVis visualization with per–node‐type and per–edge‐type colors.
     """
+    # 1. Extract fraud labels
+    dlpack = train_data["fraud_label"].values.toDlpack()
+    tx_labels = torch.from_dlpack(dlpack).long()
+
+    # Define pink shades for transaction nodes
+    # 0 → light pink; 1 → darker pink
+    tx_color_map = {
+        0: "#ffe6f0",  # very light pink
+        1: "#ff66b2"   # medium pink
+    }
+
+    # Colors for other node types
+    node_color_map = {
+        "client":   "skyblue",
+        "merchant": "orange"
+    }
+
+    # Colors for edges
+    edge_color_map = {
+        "buy":     "red",
+        "bought":  "blue",
+        "issued":  "green",
+        "sell":    "purple"
+    }
+
     # --- build IDs and graph on GPU ---
     id_arr = torch.from_dlpack(train_data[col_drop].values.toDlpack()).long()
     c_ids, m_ids, t_ids = torch.tensor_split(id_arr, 3, dim=1)
@@ -545,23 +509,8 @@ def visualize_graph(
     g_cpu = g.to('cpu')
     # to_directed=True converts hetero‐edges into a DiGraph
     nx_g = dgl.to_networkx(
-        g_cpu,
-        # node_attrs=['ntype'],      # each node carries its type
-        # edge_attrs=['etype'],      # each edge carries its (src,rel,dst)
+        g_cpu
     )
-
-    # --- define color maps ---
-    node_color_map = {
-        'client':      'skyblue',
-        'merchant':    'orange',
-        'transaction': 'pink'
-    }
-    edge_color_map = {
-        'buy':   'red',
-        'bought': 'blue',
-        'issued': 'green',
-        'sell':  'purple'
-    }
 
     # --- build PyVis Network ---
     net = Network(
@@ -575,13 +524,31 @@ def visualize_graph(
     net.toggle_physics(True)
 
     # --- add nodes with color by type ---
-    for node, data in nx_g.nodes(data=True):
-        ntype = data.get('ntype', '')  # e.g. 'client'
+    # for node, data in nx_g.nodes(data=True):
+    #     ntype = data.get('ntype', '')  # e.g. 'client'
+    #     net.add_node(
+    #         node,
+    #         label=str(node),
+    #         color=node_color_map.get(ntype, 'gray'),
+    #         title=f"{ntype} {node}"
+    #     )
+    
+    # 6. Add nodes with appropriate colors and annotations
+    for node_id, data in nx_g.nodes(data=True):
+        ntype = data.get("ntype", "")
+        if ntype == "transaction":
+            label = int(tx_labels[node_id].item())
+            color = tx_color_map[label]
+            title = f"transaction {node_id} — {'FRAUD' if label == 1 else 'OK'}"
+        else:
+            color = node_color_map.get(ntype, "gray")
+            title = f"{ntype} {node_id}"
+
         net.add_node(
-            node,
-            label=str(node),
-            color=node_color_map.get(ntype, 'gray'),
-            title=f"{ntype} {node}"
+            node_id,
+            label=str(node_id),
+            color=color,
+            title=title
         )
 
     # --- add edges with color by relation ---

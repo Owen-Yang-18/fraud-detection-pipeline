@@ -32,19 +32,19 @@ def construct_fraud_graph(
 
     # Visualize the graph structure
     visualize_graph(
-        train_part,
+        train_df,
         col_drop=['client_node', 'merchant_node', 'index'],
         partition="train"
     )
 
     visualize_graph(
-        infer_part,
+        infer_df,
         col_drop=['client_node', 'merchant_node', 'index'],
         partition="infer"
     )
 
     visualize_graph(
-        combined,
+        cudf.concat([train_df, infer_df], axis=0),
         col_drop=['client_node', 'merchant_node', 'index'],
         partition="combined"
     )
