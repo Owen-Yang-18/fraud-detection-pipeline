@@ -459,6 +459,97 @@ def build_fsi_graph(train_data: cf.DataFrame, col_drop: list[str]) -> (dgl.DGLHe
 
     return graph, feature_tensors
 
+import cudf
+from pyvis.network import Network
+
+def visualize_graph_v2(
+    df: cudf.DataFrame,
+    client_col: str,
+    merchant_col: str,
+    txn_col: str,
+    fraud_label_col: str,
+    partition: str,
+    html_path: str = None
+):
+    """
+    Build an interactive PyVis network directly from a cuDF DataFrame,
+    without DGL or NetworkX. Nodes and edges are added based on the
+    client, merchant, and transaction columns. Transaction nodes are
+    colored by fraud_label (0 vs. 1) using two shades of pink; other
+    nodes use fixed skyblue/orange. Edges are colored by relation.
+    """
+    # 1. Default html path
+    if html_path is None:
+        html_path = f"heterograph-{partition}.html"
+
+    # 2. Color mappings
+    tx_color_map = {0: "#ffe6f0", 1: "#ff66b2"}  # light vs medium pink
+    node_color_map = {
+        "client":   "skyblue",
+        "merchant": "orange"
+    }
+    edge_color_map = {
+        "buy":     "red",
+        "bought":  "blue",
+        "issued":  "green",
+        "sell":    "purple"
+    }
+
+    # 3. Instantiate PyVis network
+    net = Network(height="800px", width="100%", directed=True, notebook=False)
+    net.toggle_physics(True)
+
+    # 4. Add unique client nodes
+    for cid in df[client_col].unique().to_pandas().tolist():
+        net.add_node(
+            cid,
+            label=str(cid),
+            color=node_color_map["client"],
+            title=f"client {cid}"
+        )
+
+    # 5. Add unique merchant nodes
+    for mid in df[merchant_col].unique().to_pandas().tolist():
+        net.add_node(
+            mid,
+            label=str(mid),
+            color=node_color_map["merchant"],
+            title=f"merchant {mid}"
+        )
+
+    # 6. Add unique transaction nodes, colored by fraud_label
+    #    We assume fraud_label_col aligns 1:1 with txn_col in df
+    tx_df = df[[txn_col, fraud_label_col]].drop_duplicates().to_pandas()
+    for _, row in tx_df.iterrows():
+        tid = row[txn_col]
+        lbl = int(row[fraud_label_col])
+        net.add_node(
+            tid,
+            label=str(tid),
+            color=tx_color_map[lbl],
+            title=f"transaction {tid} — {'FRAUD' if lbl == 1 else 'OK'}"
+        )
+
+    # 7. Add edges for each relation per row
+    for idx, row in df.to_pandas().iterrows():
+        c = row[client_col]
+        m = row[merchant_col]
+        t = row[txn_col]
+
+        # client → transaction ("buy")
+        net.add_edge(c, t, color=edge_color_map["buy"],   title="buy")
+        # transaction → client ("bought")
+        net.add_edge(t, c, color=edge_color_map["bought"], title="bought")
+        # transaction → merchant ("issued")
+        net.add_edge(t, m, color=edge_color_map["issued"], title="issued")
+        # merchant → transaction ("sell")
+        net.add_edge(m, t, color=edge_color_map["sell"],   title="sell")
+
+    # 8. Save the interactive HTML
+    net.save_graph(html_path)
+    print(f"Interactive graph (v2) saved to {html_path}")
+
+
 def visualize_graph(
     train_data: cf.DataFrame,
     col_drop: list[str],
