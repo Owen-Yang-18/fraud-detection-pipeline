@@ -546,8 +546,8 @@ def visualize_graph(
     # to_directed=True converts hetero‐edges into a DiGraph
     nx_g = dgl.to_networkx(
         g_cpu,
-        node_attrs=['ntype'],      # each node carries its type
-        edge_attrs=['etype'],      # each edge carries its (src,rel,dst)
+        # node_attrs=['ntype'],      # each node carries its type
+        # edge_attrs=['etype'],      # each edge carries its (src,rel,dst)
     )
 
     # --- define color maps ---
