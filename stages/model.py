@@ -505,12 +505,26 @@ def visualize_graph(
         ('merchant',    'sell',   'transaction'): (m_ids, t_ids)
     })
 
-    # --- move to CPU and convert to a directed NetworkX graph ---
+    # 3. Save original indices per transaction node
+    #    This ensures g.nodes['transaction'].data['orig_idx'][i] == train_data row index
+    num_tx = g.num_nodes('transaction')
+    g.nodes['transaction'].data['orig_idx'] = torch.arange(num_tx)  # 0…num_tx-1
+
+    # 4. Convert to NetworkX, including orig_idx and node types
     g_cpu = g.to('cpu')
-    # to_directed=True converts hetero‐edges into a DiGraph
     nx_g = dgl.to_networkx(
-        g_cpu
+        g_cpu,
+        node_attrs=['ntype', 'orig_idx'],    # carry over node type and original index
+        edge_attrs=['etype'],                # carry over relation name
+        to_directed=True
     )
+
+    # # --- move to CPU and convert to a directed NetworkX graph ---
+    # g_cpu = g.to('cpu')
+    # # to_directed=True converts hetero‐edges into a DiGraph
+    # nx_g = dgl.to_networkx(
+    #     g_cpu
+    # )
 
     # --- build PyVis Network ---
     net = Network(
