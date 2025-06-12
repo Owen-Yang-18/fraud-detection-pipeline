@@ -595,7 +595,7 @@ def visualize_graph(
         )
 
     # --- generate and save HTML ---
-    net.show(f"heterograph-{partition}.html")
+    net.save_graph(f"heterograph-{partition}.html")
 
 
 def prepare_data(
