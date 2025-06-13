@@ -360,6 +360,126 @@ class HinSAGE(BaseHeteroGraph):
         self.layers.append(nn.Linear(hidden_size, out_size))
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  HINSAGE TRAINING HELPER
+# ──────────────────────────────────────────────────────────────────────────────
+
+def train_hinsage(
+    graph: dgl.DGLHeteroGraph,
+    features: torch.Tensor,
+    train_idx: torch.Tensor,
+    labels: torch.Tensor,
+    in_size: int,
+    hidden_size: int = 64,
+    out_size: int = 2,
+    n_layers: int = 2,
+    embedding_size: int = 1,
+    fanouts: list[int] = [3, 3],
+    batch_size: int = 100,
+    epochs: int = 20,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    device: typing.Optional[torch.device] = None,
+    save_path: str = "model"
+) -> HinSAGE:
+    """
+    Train a HinSAGE model end-to-end on the given heterogeneous graph.
+
+    Parameters
+    ----------
+    graph : dgl.DGLHeteroGraph
+        Full graph including train & validation nodes.
+    features : torch.Tensor
+        Node features tensor of shape (N, F).
+    train_idx : torch.Tensor
+        1D tensor of transaction node indices to train on.
+    labels : torch.Tensor
+        1D tensor of shape (N,) with integer labels (0/1) for fraud.
+    in_size : int
+        Number of input features for 'transaction' nodes.
+    hidden_size, out_size, n_layers, embedding_size : int
+        Model hyperparameters.
+    fanouts : list[int]
+        Number of neighbors to sample at each layer.
+    batch_size : int
+        Mini-batch size for neighbor sampling.
+    epochs : int
+        Number of training epochs.
+    lr : float
+        Learning rate.
+    weight_decay : float
+        L2 regularization.
+    device : torch.device, optional
+        CUDA or CPU. If None, auto-selects.
+    save_path : str
+        Directory to save `hinsage.pt` after training.
+
+    Returns
+    -------
+    Hinsage model (trained)
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    graph = graph.to(device)
+    features = features.to(device)
+    train_idx = train_idx.to(device)
+    labels = labels.to(device)
+
+    # 1. DataLoader with neighbor sampler
+    sampler = dgl.dataloading.MultiLayerNeighborSampler(fanouts)
+    dataloader = dgl.dataloading.DataLoader(
+        graph,
+        {'transaction': train_idx},
+        sampler,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+        num_workers=4
+    )
+
+    # 2. Model, loss, optimizer
+    model = HinSAGE(
+        graph,
+        in_size=in_size,
+        hidden_size=hidden_size,
+        out_size=out_size,
+        n_layers=n_layers,
+        embedding_size=embedding_size,
+        target="transaction"
+    ).to(device)
+
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # 3. Training loop
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0.0
+
+        for input_nodes, output_nodes, blocks in dataloader:
+            # a) features for this batch
+            h = features[input_nodes['transaction']]
+            # b) forward
+            logits, _ = model(blocks, h)
+            batch_labels = labels[output_nodes['transaction']]
+            # c) backward
+            loss = loss_fn(logits, batch_labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+
+        avg = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1}/{epochs} — Loss: {avg:.4f}")
+
+    # 4. Save weights
+    os.makedirs(save_path, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(save_path, "hinsage.pt"))
+    print(f"Trained HinSAGE weights saved to {save_path}/hinsage.pt")
+
+    return model
+
 def load_model(model_dir: str,
                gnn_model: BaseHeteroGraph = HinSAGE,
                device: torch.device = None) -> (BaseHeteroGraph, dgl.DGLHeteroGraph, dict):

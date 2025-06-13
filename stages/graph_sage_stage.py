@@ -1,7 +1,7 @@
 import cudf
 import torch
 
-from .model import load_model
+from .model import load_model, build_fsi_graph, prepare_data, train_hinsage
 
 
 class GraphSAGEStage:
@@ -52,8 +52,33 @@ class GraphSAGEStage:
         cudf.DataFrame
             A copy of df_input with new columns "ind_emb_0", "ind_emb_1", … appended.
         """
+
+        # 1) Prepare data
+        train_df = cudf.read_csv("training.csv")
+        val_df   = cudf.read_csv("validation.csv")
+        td, vd, tidx, vidx, labels, all_df = prepare_data(train_df, val_df)
+        g, feats = build_fsi_graph(all_df, ["client_node","merchant_node","index"])
+
+        # 2) Train
+        model = train_hinsage(
+            graph=g,
+            features=feats,
+            train_idx=tidx,
+            labels=labels,
+            in_size=feats.shape[1],
+            save_path="model"
+        )
+
         # 1. perform inductive inference
-        embeddings, _ = self.model.inference(
+        # embeddings, _ = self.model.inference(
+        #     graph,
+        #     node_features,
+        #     test_index,
+        #     target_node=self.hyperparams.get("target_node", "transaction"),
+        #     batch_size=self.batch_size
+        # )
+
+        embeddings, _ = model.inference(
             graph,
             node_features,
             test_index,
