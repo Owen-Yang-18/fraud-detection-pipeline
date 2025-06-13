@@ -52,4 +52,4 @@ def construct_fraud_graph(
     # Convert test indices from cuDF to torch.LongTensor via DLPack
     test_index = torch.from_dlpack(infer_idx.values.toDlpack()).long()
 
-    return graph, node_features.float(), test_index
+    return graph, node_features.float(), train_idx, test_index
