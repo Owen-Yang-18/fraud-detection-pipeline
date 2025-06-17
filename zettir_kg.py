@@ -77,116 +77,85 @@ def sine_cosine_to_mdh(
 # -------------------------------------------------------------------------
 # 3. Graph-building helper
 # -------------------------------------------------------------------------
-def build_graph_for_mac(
-        mac: str,
-        df_proc, df_sock) -> dgl.DGLHeteroGraph:
+# ── 2.  build heterogeneous graph  (iteration simplified) ─────────────
+def build_graph_for_mac(mac: str, df_proc, df_sock):
     """
-    Build a heterogeneous DGL graph for *one* MAC address.
+    Build a heterogeneous DGL graph for a single MAC address.
+
+    cuDF → pandas conversion is done *only* for iteration so that we can
+    rely on df.iterrows() everywhere – simple and readable.
     """
-    # Filter rows for this device
+    # a) keep rows for this device
     df_proc = df_proc[df_proc["mac"] == mac]
     df_sock = df_sock[df_sock["mac"] == mac]
 
-    # Dictionaries mapping raw identifiers -> node IDs for each ntype
-    node_maps: Dict[str, Dict[str, int]] = defaultdict(dict)
-    node_feat  = defaultdict(list)   # store properties if needed
+    # ---- convert to pandas for row-wise iteration --------------------
+    #     (cuDF → CPU copy; fine for per-device sub-graph size)
+    df_proc = df_proc.to_pandas()
+    df_sock = df_sock.to_pandas()
 
-    # Helper to fetch/create node IDs
-    def node_id(ntype: str, key: str):
-        mapping = node_maps[ntype]
-        if key not in mapping:
-            mapping[key] = len(mapping)
-        return mapping[key]
+    # b) maps: raw key → node id per node-type
+    node_maps = defaultdict(dict)
+    def nid(ntype, key):
+        mp = node_maps[ntype]
+        if key not in mp:
+            mp[key] = len(mp)
+        return mp[key]
 
-    # Edge containers
-    edge_src, edge_dst, edge_etype = [], [], []
+    edge_src, edge_dst, edge_rel = [], [], []
 
-    # -----------------------------------------------------------------
-    # Device node (single per MAC)
-    device_nid = node_id("Device", mac)
+    device_id = nid("Device", mac)                     # one Device node
 
-    # -----------------------------------------------------------------
-    # ProcessEvent nodes + edges
+    # c) ProcessEvent rows
     for idx, row in df_proc.iterrows():
-        event_key = f"proc_{idx}"
-        e_nid = node_id("ProcessEvent", event_key)
+        e_id  = nid("ProcessEvent", f"proc_{idx}")
+        add_id = nid("AddOn", row["addon_content__pkgName"])
 
-        # Add basic edges
-        edge_src += [e_nid]
-        edge_dst += [device_nid]
-        edge_etype += ["ON_DEVICE"]
-
-        add_on = row["addon_content__pkgName"]
-        addon_nid = node_id("AddOn", add_on)
-        edge_src += [e_nid]
-        edge_dst += [addon_nid]
-        edge_etype += ["USES_ADDON"]
-
-        # Date-time node
         m, d, h = sine_cosine_to_mdh(
-            row["month_of_year_sine"],   row["month_of_year_cosine"],
-            row["hour_of_day_sine"],     row["hour_of_day_cosine"],
-            row["day_of_week_sine"],     row["day_of_week_cosine"]
+            row["month_of_year_sine"],  row["month_of_year_cosine"],
+            row["hour_of_day_sine"],    row["hour_of_day_cosine"],
+            row["day_of_week_sine"],    row["day_of_week_cosine"]
         )
-        dt_key = f"{m}-{d}-{h}"
-        dt_nid = node_id("DateTime", dt_key)
-        edge_src += [e_nid]
-        edge_dst += [dt_nid]
-        edge_etype += ["AT_TIME"]
+        dt_id = nid("DateTime", f"{m}-{d}-{h}")
 
-    # -----------------------------------------------------------------
-    # SocketEvent nodes + edges
+        edge_src += [e_id, e_id, e_id]
+        edge_dst += [device_id, add_id, dt_id]
+        edge_rel += ["ON_DEVICE", "USES_ADDON", "AT_TIME"]
+
+    # d) SocketEvent rows
     for idx, row in df_sock.iterrows():
-        event_key = f"sock_{idx}"
-        e_nid = node_id("SocketEvent", event_key)
+        e_id  = nid("SocketEvent", f"sock_{idx}")
+        add_id = nid("AddOn", row["addon_content__pkgName"])
 
-        # edges to device / add-on
-        edge_src += [e_nid, e_nid]
-        edge_dst += [device_nid,
-                     node_id("AddOn", row["addon_content__pkgName"])]
-        edge_etype += ["ON_DEVICE", "USES_ADDON"]
-
-        # Host node (full IP)
         ip = ".".join(str(int(row[f"remote_octet_{i}"])) for i in range(1, 5))
-        host_nid = node_id("Host", ip)
-        edge_src.append(e_nid); edge_dst.append(host_nid); edge_etype.append("TO_HOST")
+        host_id = nid("Host", ip)
 
-        # Date-time node
         m, d, h = sine_cosine_to_mdh(
-            row["month_of_year_sine"],   row["month_of_year_cosine"],
-            row["hour_of_day_sine"],     row["hour_of_day_cosine"],
-            row["day_of_week_sine"],     row["day_of_week_cosine"]
+            row["month_of_year_sine"],  row["month_of_year_cosine"],
+            row["hour_of_day_sine"],    row["hour_of_day_cosine"],
+            row["day_of_week_sine"],    row["day_of_week_cosine"]
         )
-        dt_nid = node_id("DateTime", f"{m}-{d}-{h}")
-        edge_src.append(e_nid); edge_dst.append(dt_nid); edge_etype.append("AT_TIME")
+        dt_id = nid("DateTime", f"{m}-{d}-{h}")
 
-    # -----------------------------------------------------------------
-    # Build DGL heterograph
-    # Convert lists -> tensors
-    edge_src = torch.tensor(edge_src)
-    edge_dst = torch.tensor(edge_dst)
-    edge_etype = np.array(edge_etype)
+        edge_src += [e_id, e_id, e_id, e_id]
+        edge_dst += [device_id, add_id, host_id, dt_id]
+        edge_rel += ["ON_DEVICE", "USES_ADDON", "TO_HOST", "AT_TIME"]
 
-    # Gather edges per canonical etype (src_ntype, rel, dst_ntype)
-    etype_dict = defaultdict(lambda: ([], []))  # (srcs, dsts)
-    # Map node-id back to ntype
-    nid2ntype = {}
-    for ntype, mapping in node_maps.items():
-        for k, nid in mapping.items():
-            nid2ntype[nid] = ntype
+    # e) bucket edges per canonical etype
+    nid2type = {n: t for t, mp in node_maps.items() for n in mp.values()}
+    buckets = defaultdict(lambda: ([], []))
+    for s, t, r in zip(edge_src, edge_dst, edge_rel):
+        k = (nid2type[s], r, nid2type[t])
+        buckets[k][0].append(s)
+        buckets[k][1].append(t)
 
-    for s, t, rel in zip(edge_src, edge_dst, edge_etype):
-        k = (nid2ntype[int(s)], rel, nid2ntype[int(t)])
-        etype_dict[k][0].append(int(s))
-        etype_dict[k][1].append(int(t))
+    # f) build heterograph
+    edge_dict = {k: (torch.tensor(v[0]), torch.tensor(v[1]))
+                 for k, v in buckets.items()}
+    num_nodes = {t: len(mp) for t, mp in node_maps.items()}
+    G = dgl.heterograph(edge_dict, num_nodes_dict=num_nodes)
 
-    # tensor-ise
-    edge_data = {k: (torch.tensor(v[0]), torch.tensor(v[1]))
-                 for k, v in etype_dict.items()}
-
-    G = dgl.heterograph(edge_data)   # build heterograph :contentReference[oaicite:4]{index=4}
     return G, node_maps
-
 
 # -------------------------------------------------------------------------
 # 4. Visualise with PyVis
