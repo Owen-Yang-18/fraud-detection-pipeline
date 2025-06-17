@@ -148,20 +148,26 @@ def visualise(G, maps, html="graph.html"):
     net = Network(height="750px", width="100%", directed=True)
     net.toggle_physics(True)
 
-    # nodes
-    for ntype, mp in maps.items():
-        for key, nid in mp.items():
-            label = key if len(key) < 25 else key[:22] + "…"
-            net.add_node(nid, label=label, title=f"{ntype}: {key}",
-                         color=NODE_COLOR.get(ntype, "grey"))
+    # Add nodes (one per entry in node_maps)
+    for ntype, mapping in maps.items():
+        for key, nid in mapping.items():
+            label = key if len(str(key)) < 25 else (str(key)[:22] + "…")
+            net.add_node(
+                nid,
+                label=label,
+                title=f"{ntype}: {key}",
+                color=NODE_COLOR.get(ntype, "grey")
+            )
 
-    # edges
-    for (snt, rel, dnt), (src, dst) in G.adj_sparse("coo").items():
-        # dgl.adj_sparse gives multiple etypes, but easiest is iterate canonical
-        s_ids, d_ids = G.edges(etype=(snt, rel, dnt))
-        for s_idx, d_idx in zip(s_ids.tolist(), d_ids.tolist()):
-            net.add_edge(s_idx, d_idx, title=rel,
-                         color=EDGE_COLOR.get(rel, "black"))
+    # Add edges for every canonical edge-type
+    for (src_ntype, rel, dst_ntype) in G.canonical_etypes:
+        src_ids, dst_ids = G.edges(etype=(src_ntype, rel, dst_ntype))
+        for s, d in zip(src_ids.tolist(), dst_ids.tolist()):
+            net.add_edge(
+                s, d,
+                title=rel,
+                color=EDGE_COLOR.get(rel, "black")
+            )
 
     net.save_graph(html)
     print("PyVis saved →", html)
@@ -191,3 +197,6 @@ if __name__ == "__main__":
 # Several improvements. First, remove the ‘Device’ node, since we only have one. Also, we need to clarify the edge types. firstly, AddOn ndoes are connected to ProcessEvent via relationships (processevent, uses addon, addon) and (addon, used by, processevent). secondly, AddOn nodes are connected to SocketEvent via relationships (socketevent, uses addon, addon) and (addon, used by, socketevent). thirdly, SocketEvent nodes are connected to Host nodes via relationships (socketevent, to host, host) and (host, hosted, socketevent). finally, DateTime nodes are connected to ProcessEvent and SocketEvent nodes via relationships (processevent, at time, datetime), (datetime, occured, processevent), (socketevent, at time, datetime), and (datetime, occured, socketevent). please update the code to reflect these changes.
 
 # you still need improvements. first, you still have edges like (host, at time, host), (host, hosted, host), (host, occured, host), (host, uses addon, socketevent). also, you do not have edges that connect to any datetime nodes. 
+
+# fix the error "attributeerror: 'dglgraph' object has no attribute 'adj_sparse'". this error occurs because the dglgraph object does not have an adj_sparse method. instead, you can use the edges method to get the edges of the graph. here is how you can fix the error:
+# replace the line "for (snt, rel, dnt), (src, dst) in G.adj_sparse("coo").items():" with "for (snt, rel, dnt), (src, dst) in G.edges(etype=(snt, rel, dnt)).items():"
