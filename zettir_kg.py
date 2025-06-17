@@ -136,7 +136,7 @@ def build_graph(mac: str, df_proc, df_sock):
     return G, node_maps
 
 # --------------------------------------------------------------------
-# 2.  PyVis visualisation (unchanged except colour legend updated)
+#  PyVis visualisation with global-unique node IDs  (FIXED)
 # --------------------------------------------------------------------
 NODE_COLOR = dict(ProcessEvent="#1f77b4", SocketEvent="#e377c2",
                   AddOn="#ff7f0e", DateTime="#9467bd", Host="#d62728")
@@ -144,33 +144,51 @@ EDGE_COLOR = dict(USES_ADDON="black", USED_BY="gray",
                   TO_HOST="red", HOSTED="orange",
                   AT_TIME="purple", OCCURED="green")
 
-def visualise(G, maps, html="graph.html"):
+def visualise(G, node_maps, html="graph.html"):
+    """
+    Render the heterogeneous graph in PyVis.
+
+    *Every node gets a unique global ID*  (= type_offset + local_id),
+    so different node-types never collide inside PyVis.
+    """
     net = Network(height="750px", width="100%", directed=True)
     net.toggle_physics(True)
 
-    # Add nodes (one per entry in node_maps)
-    for ntype, mapping in maps.items():
-        for key, nid in mapping.items():
-            label = key if len(str(key)) < 25 else (str(key)[:22] + "…")
+    # 1. allocate a disjoint integer ID range for each node-type
+    type_offset: Dict[str, int] = {}
+    next_id = 0
+    for ntype, mapping in node_maps.items():
+        type_offset[ntype] = next_id
+        next_id += len(mapping)
+
+    # 2. add nodes with global IDs
+    for ntype, mapping in node_maps.items():
+        off = type_offset[ntype]
+        for local_key, local_id in mapping.items():
+            gid = off + local_id                          # global id
+            label = (str(local_key) if len(str(local_key)) < 25
+                     else str(local_key)[:22] + "…")
             net.add_node(
-                nid,
+                gid,
                 label=label,
-                title=f"{ntype}: {key}",
+                title=f"{ntype}: {local_key}",
                 color=NODE_COLOR.get(ntype, "grey")
             )
 
-    # Add edges for every canonical edge-type
-    for (src_ntype, rel, dst_ntype) in G.canonical_etypes:
-        src_ids, dst_ids = G.edges(etype=(src_ntype, rel, dst_ntype))
-        for s, d in zip(src_ids.tolist(), dst_ids.tolist()):
+    # 3. add edges, remapping local IDs → global IDs on the fly
+    for (snt, rel, dnt) in G.canonical_etypes:
+        s_local, d_local = G.edges(etype=(snt, rel, dnt))
+        s_off, d_off = type_offset[snt], type_offset[dnt]
+        for s, d in zip(s_local.tolist(), d_local.tolist()):
             net.add_edge(
-                s, d,
+                s_off + s,
+                d_off + d,
                 title=rel,
                 color=EDGE_COLOR.get(rel, "black")
             )
 
     net.save_graph(html)
-    print("PyVis saved →", html)
+    print(f"PyVis HTML saved → {html}")
 
 # ─────────────────────────────────────────────────────────────────────
 # 4. CLI
