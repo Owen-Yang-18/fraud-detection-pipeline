@@ -58,84 +58,113 @@ def sine_cosine_to_mdh(sin_m, cos_m, sin_h, cos_h, sin_d, cos_d) -> Tuple[int, i
 # ─────────────────────────────────────────────────────────────────────
 # 2. build heterograph for a single MAC
 # ─────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------
+# 1.  Build heterograph for a single MAC (no Device node)
+# --------------------------------------------------------------------
 def build_graph(mac: str, df_proc, df_sock):
-    # a) keep rows for target MAC and move to pandas for easy iterrows
+    # ── filter rows for this device & move to pandas for simple iterrows
     df_proc = df_proc[df_proc["mac"] == mac].to_pandas()
     df_sock = df_sock[df_sock["mac"] == mac].to_pandas()
 
+    # ── per-type node dictionaries
     node_maps: Dict[str, Dict[str, int]] = defaultdict(dict)
-    def nid(ntype, key):
+
+    def nid(ntype: str, key: str) -> int:
+        """Return (or create) a node-id local to its node-type."""
         mp = node_maps[ntype]
-        if key not in mp: mp[key] = len(mp)
+        if key not in mp:
+            mp[key] = len(mp)
         return mp[key]
 
-    src, dst, rel = [], [], []
+    # ── edge collector: dict[(src_ntype, rel, dst_ntype)] → (src_ids, dst_ids)
+    edge_dict: Dict[Tuple[str, str, str], Tuple[list, list]] = defaultdict(lambda: ([], []))
 
-    # ---------- ProcessEvent nodes ----------
+    def add_edge(s_type, s_id, rel, d_type, d_id):
+        l = edge_dict[(s_type, rel, d_type)]
+        l[0].append(s_id)
+        l[1].append(d_id)
+
+    # ── ProcessEvent nodes & edges
     for idx, row in df_proc.iterrows():
         pe = nid("ProcessEvent", f"proc_{idx}")
-        addon = nid("AddOn", row["addon_content__pkgName"])
+        addon = nid("AddOn",      str(row["addon_content__pkgName"]))
+
         m, d, h = sine_cosine_to_mdh(row["month_of_year_sine"],  row["month_of_year_cosine"],
                                      row["hour_of_day_sine"],    row["hour_of_day_cosine"],
                                      row["day_of_week_sine"],    row["day_of_week_cosine"])
-        dt = nid("DateTime", f"{m}-{d}-{h}")
+        dt = nid("DateTime",      f"{m}-{d}-{h}")
 
-        # USES_ADDON (forward & reverse)
-        src += [pe, addon];  dst += [addon, pe];  rel += ["USES_ADDON", "USED_BY"]
-        # AT_TIME     (forward & reverse)
-        src += [pe, dt];     dst += [dt, pe];     rel += ["AT_TIME", "OCCURED"]
+        # ProcessEvent ↔ AddOn
+        add_edge("ProcessEvent", pe, "USES_ADDON", "AddOn", addon)
+        add_edge("AddOn",        addon, "USED_BY",   "ProcessEvent", pe)
+        # ProcessEvent ↔ DateTime
+        add_edge("ProcessEvent", pe, "AT_TIME",     "DateTime", dt)
+        add_edge("DateTime",     dt, "OCCURED",     "ProcessEvent", pe)
 
-    # ---------- SocketEvent nodes ----------
+    # ── SocketEvent nodes & edges
     for idx, row in df_sock.iterrows():
         se = nid("SocketEvent", f"sock_{idx}")
-        addon = nid("AddOn", row["addon_content__pkgName"])
-        ip = ".".join(str(int(row[f"remote_octet_{i}"])) for i in range(1,5))
+        addon = nid("AddOn",     str(row["addon_content__pkgName"]))
+        ip = ".".join(str(int(row[f"remote_octet_{i}"])) for i in range(1, 5))
         host = nid("Host", ip)
+
         m, d, h = sine_cosine_to_mdh(row["month_of_year_sine"],  row["month_of_year_cosine"],
                                      row["hour_of_day_sine"],    row["hour_of_day_cosine"],
                                      row["day_of_week_sine"],    row["day_of_week_cosine"])
         dt = nid("DateTime", f"{m}-{d}-{h}")
 
-        # USES_ADDON (fwd & rev)
-        src += [se, addon];  dst += [addon, se];  rel += ["USES_ADDON", "USED_BY"]
-        # TO_HOST     (fwd & rev)
-        src += [se, host];   dst += [host, se];   rel += ["TO_HOST", "HOSTED"]
-        # AT_TIME     (fwd & rev)
-        src += [se, dt];     dst += [dt, se];     rel += ["AT_TIME", "OCCURED"]
+        # SocketEvent ↔ AddOn
+        add_edge("SocketEvent", se, "USES_ADDON", "AddOn", addon)
+        add_edge("AddOn",       addon, "USED_BY",  "SocketEvent", se)
 
-    # ---------- group edges by canonical etype ----------
-    nid2t = {nid: t for t, mp in node_maps.items() for nid in mp.values()}
-    buckets = defaultdict(lambda: ([], []))        # (srcs, dsts)
-    for s, t, r in zip(src, dst, rel):
-        buckets[(nid2t[s], r, nid2t[t])][0].append(s)
-        buckets[(nid2t[s], r, nid2t[t])][1].append(t)
+        # SocketEvent ↔ Host
+        add_edge("SocketEvent", se, "TO_HOST", "Host", host)
+        add_edge("Host",        host, "HOSTED", "SocketEvent", se)
 
-    edge_dict = {k: (torch.tensor(v[0]), torch.tensor(v[1])) for k,v in buckets.items()}
-    G = dgl.heterograph(edge_dict, num_nodes_dict={t: len(mp) for t,mp in node_maps.items()})
+        # SocketEvent ↔ DateTime
+        add_edge("SocketEvent", se, "AT_TIME", "DateTime", dt)
+        add_edge("DateTime",    dt, "OCCURED", "SocketEvent", se)
+
+    # ── build DGL heterograph
+    dgl_edges = {
+        k: (torch.tensor(v[0]), torch.tensor(v[1]))
+        for k, v in edge_dict.items()
+    }
+    num_nodes = {ntype: len(mp) for ntype, mp in node_maps.items()}
+    G = dgl.heterograph(dgl_edges, num_nodes_dict=num_nodes)   # canonical-etype safe
+
     return G, node_maps
 
-# ─────────────────────────────────────────────────────────────────────
-# 3. PyVis visualisation
-# ─────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------
+# 2.  PyVis visualisation (unchanged except colour legend updated)
+# --------------------------------------------------------------------
 NODE_COLOR = dict(ProcessEvent="#1f77b4", SocketEvent="#e377c2",
                   AddOn="#ff7f0e", DateTime="#9467bd", Host="#d62728")
 EDGE_COLOR = dict(USES_ADDON="black", USED_BY="gray",
                   TO_HOST="red", HOSTED="orange",
                   AT_TIME="purple", OCCURED="green")
 
-def visualise(G, mp, html="graph.html"):
+def visualise(G, maps, html="graph.html"):
     net = Network(height="750px", width="100%", directed=True)
     net.toggle_physics(True)
-    for ntype, m in mp.items():
-        for key, nid in m.items():
-            lab = key if len(str(key))<25 else key[:22]+"…"
-            net.add_node(nid, label=lab, color=NODE_COLOR.get(ntype,"grey"),
-                         title=f"{ntype}: {key}")
-    for (snt, rel, dnt) in G.canonical_etypes:
-        s, d = G.edges(etype=(snt, rel, dnt))
-        for a,b in zip(s.tolist(), d.tolist()):
-            net.add_edge(a,b,color=EDGE_COLOR.get(rel,"black"),title=rel)
-    net.save_graph(html); print("PyVis saved →", html)
+
+    # nodes
+    for ntype, mp in maps.items():
+        for key, nid in mp.items():
+            label = key if len(key) < 25 else key[:22] + "…"
+            net.add_node(nid, label=label, title=f"{ntype}: {key}",
+                         color=NODE_COLOR.get(ntype, "grey"))
+
+    # edges
+    for (snt, rel, dnt), (src, dst) in G.adj_sparse("coo").items():
+        # dgl.adj_sparse gives multiple etypes, but easiest is iterate canonical
+        s_ids, d_ids = G.edges(etype=(snt, rel, dnt))
+        for s_idx, d_idx in zip(s_ids.tolist(), d_ids.tolist()):
+            net.add_edge(s_idx, d_idx, title=rel,
+                         color=EDGE_COLOR.get(rel, "black"))
+
+    net.save_graph(html)
+    print("PyVis saved →", html)
 
 # ─────────────────────────────────────────────────────────────────────
 # 4. CLI
@@ -160,3 +189,5 @@ if __name__ == "__main__":
 
     
 # Several improvements. First, remove the ‘Device’ node, since we only have one. Also, we need to clarify the edge types. firstly, AddOn ndoes are connected to ProcessEvent via relationships (processevent, uses addon, addon) and (addon, used by, processevent). secondly, AddOn nodes are connected to SocketEvent via relationships (socketevent, uses addon, addon) and (addon, used by, socketevent). thirdly, SocketEvent nodes are connected to Host nodes via relationships (socketevent, to host, host) and (host, hosted, socketevent). finally, DateTime nodes are connected to ProcessEvent and SocketEvent nodes via relationships (processevent, at time, datetime), (datetime, occured, processevent), (socketevent, at time, datetime), and (datetime, occured, socketevent). please update the code to reflect these changes.
+
+# you still need improvements. first, you still have edges like (host, at time, host), (host, hosted, host), (host, occured, host), (host, uses addon, socketevent). also, you do not have edges that connect to any datetime nodes. 
