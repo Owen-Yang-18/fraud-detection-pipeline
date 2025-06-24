@@ -279,3 +279,183 @@ if __name__ == "__main__":
 # 66. addon_content__remotePort
 # 67. addon_content__sourceAddress
 # 68. addon_content__sourcePort
+
+
+import pandas as pd
+import numpy as np
+import dgl
+import torch
+import os
+
+def create_dummy_frequency_csv(num_samples=50):
+    """
+    Generates a dummy CSV file that matches your description, including the
+    specific column naming conventions and 'Class' for the label.
+    """
+    print(f"Creating a dummy CSV file with {num_samples} samples...")
+    
+    # Define feature names that follow the user's rules
+    syscall_features = ['read', 'write', 'openat', 'execve', 'chmod', 'futex']
+    binder_features = ['sendSMS', 'getDeviceId', 'startActivity', 'queryContentProviders']
+    composite_features = ['NETWORK_WRITE_EXEC', 'READ_CONTACTS(D)', 'DYNAMIC_CODE_LOADING']
+    
+    features = syscall_features + binder_features + composite_features
+    
+    # Create random frequency data
+    data = np.random.randint(0, 30, size=(num_samples, len(features)))
+    df = pd.DataFrame(data, columns=features)
+    
+    # Make some data zero to ensure not all nodes are connected
+    df.loc[df.sample(frac=0.3).index, np.random.choice(df.columns, 3)] = 0
+    
+    # Add an application ID column
+    df.insert(0, 'app_id', [f'app_{i}' for i in range(num_samples)])
+    
+    # Generate labels based on a simple rule and name the column 'Class'
+    labels = []
+    for i, row in df.iterrows():
+        malicious_score = (
+            row['execve'] + row['sendSMS'] * 2 + row['NETWORK_WRITE_EXEC'] * 3
+        )
+        labels.append('malware' if malicious_score > 70 else 'benign')
+            
+    df['Class'] = labels # The label column is now named 'Class'
+    
+    file_path = 'app_behavior_frequencies.csv'
+    df.to_csv(file_path, index=False)
+    print(f"Dummy data saved to '{file_path}'")
+    return file_path
+
+def classify_feature_name(name):
+    """Classifies a column name as syscall, binder, or composite."""
+    if name.islower():
+        return 'syscall'
+    if not any(c.islower() for c in name):
+        return 'composite'
+    return 'binder'
+
+def create_heterogeneous_graph(csv_path):
+    """
+    Processes a frequency-based CSV into a DGL heterogeneous graph with
+    reciprocal edges and NO node features.
+    """
+    print(f"\n--- Starting Heterogeneous Graph Construction from {csv_path} ---")
+
+    # 1. Load Data
+    print("\nStep 1: Loading data...")
+    df = pd.read_csv(csv_path)
+
+    # 2. Identify Node Types and Create Mappings
+    print("Step 2: Identifying node types and creating ID mappings...")
+    app_ids = df['app_id'].unique()
+    app_map = {name: i for i, name in enumerate(app_ids)}
+    
+    # Get action columns, ignoring app_id and the new 'Class' label column
+    action_cols = [col for col in df.columns if col not in ['app_id', 'Class']]
+    syscall_nodes = [col for col in action_cols if classify_feature_name(col) == 'syscall']
+    binder_nodes = [col for col in action_cols if classify_feature_name(col) == 'binder']
+    composite_nodes = [col for col in action_cols if classify_feature_name(col) == 'composite']
+
+    syscall_map = {name: i for i, name in enumerate(syscall_nodes)}
+    binder_map = {name: i for i, name in enumerate(binder_nodes)}
+    composite_map = {name: i for i, name in enumerate(composite_nodes)}
+    
+    print(f"- Found {len(app_map)} 'application' nodes.")
+    print(f"- Found {len(syscall_map)} 'syscall' nodes.")
+    print(f"- Found {len(binder_map)} 'binder' nodes.")
+    print(f"- Found {len(composite_map)} 'composite_behavior' nodes.")
+
+    # 3. Prepare Edge Lists and Edge Features
+    print("Step 3: Building edge lists and feature weights...")
+    app_src, syscall_dst, syscall_freq = [], [], []
+    app_src_b, binder_dst, binder_freq = [], [], []
+    app_src_c, composite_dst, composite_freq = [], [], []
+
+    for _, row in df.iterrows():
+        current_app_id = app_map[row['app_id']]
+        for action_name in syscall_nodes:
+            if row[action_name] > 0:
+                app_src.append(current_app_id)
+                syscall_dst.append(syscall_map[action_name])
+                syscall_freq.append(row[action_name])
+        for action_name in binder_nodes:
+            if row[action_name] > 0:
+                app_src_b.append(current_app_id)
+                binder_dst.append(binder_map[action_name])
+                binder_freq.append(row[action_name])
+        for action_name in composite_nodes:
+            if row[action_name] > 0:
+                app_src_c.append(current_app_id)
+                composite_dst.append(composite_map[action_name])
+                composite_freq.append(row[action_name])
+
+    # 4. Prepare Node Labels (No Node Features)
+    print("Step 4: Preparing node labels (no node features)...")
+    # Convert 'malware'/'benign' labels from 'Class' column to a numeric tensor (1/0)
+    app_labels = torch.tensor([1 if label == 'malware' else 0 for label in df['Class']])
+    print("- ALL node types will have no input features ('feat').")
+    print("- 'application' nodes will have a ground-truth 'label' for training/evaluation.")
+
+
+    # 5. Construct the Graph with Reciprocal Edges
+    print("Step 5: Assembling the DGL graph with reciprocal edges...")
+    graph_data = {
+        # Forward edges (application -> action)
+        ('application', 'uses', 'syscall'): (app_src, syscall_dst),
+        ('application', 'uses', 'binder'): (app_src_b, binder_dst),
+        ('application', 'exhibits', 'composite_behavior'): (app_src_c, composite_dst),
+        
+        # Reciprocal edges (action -> application)
+        ('syscall', 'used_by', 'application'): (syscall_dst, app_src),
+        ('binder', 'used_by', 'application'): (binder_dst, app_src_b),
+        ('composite_behavior', 'exhibited_by', 'application'): (composite_dst, app_src_c)
+    }
+    
+    g = dgl.heterograph(graph_data, num_nodes_dict={
+        'application': len(app_map),
+        'syscall': len(syscall_map),
+        'binder': len(binder_map),
+        'composite_behavior': len(composite_map)
+    })
+
+    # 6. Add Data to Graph (Labels and Edge Weights)
+    print("Step 6: Adding ground-truth labels and edge weights to graph...")
+    # Add ground-truth labels to application nodes for training/evaluation
+    g.nodes['application'].data['label'] = app_labels
+    
+    # Add frequency weights to forward edges
+    g.edges['uses', 'syscall'].data['frequency'] = torch.tensor(syscall_freq, dtype=torch.float32)
+    g.edges['uses', 'binder'].data['frequency'] = torch.tensor(binder_freq, dtype=torch.float32)
+    g.edges['exhibits', 'composite_behavior'].data['frequency'] = torch.tensor(composite_freq, dtype=torch.float32)
+
+    # Add frequency weights to reciprocal edges
+    g.edges['used_by', 'syscall'].data['frequency'] = torch.tensor(syscall_freq, dtype=torch.float32)
+    g.edges['used_by', 'binder'].data['frequency'] = torch.tensor(binder_freq, dtype=torch.float32)
+    g.edges['exhibited_by', 'application'].data['frequency'] = torch.tensor(composite_freq, dtype=torch.float32)
+
+    print("\nGraph construction complete!")
+    return g
+
+if __name__ == '__main__':
+    data_file_path = create_dummy_frequency_csv()
+    hetero_graph = create_heterogeneous_graph(data_file_path)
+
+    # --- Verification ---
+    if hetero_graph:
+        print("\n--- Graph Summary ---")
+        print(hetero_graph)
+        
+        # Verify node features are now gone
+        print("\n--- Node Feature Inspection ---")
+        for ntype in hetero_graph.ntypes:
+            # Check if the .data dictionary is empty or only contains 'label'
+            if not hetero_graph.nodes[ntype].data or list(hetero_graph.nodes[ntype].data.keys()) == ['label']:
+                 print(f"Node type '{ntype}' correctly has no input features ('feat').")
+            else:
+                 print(f"Node type '{ntype}' INCORRECTLY has features: {hetero_graph.nodes[ntype].data.keys()}")
+        
+        print("\nGround truth label for first application node:", hetero_graph.nodes['application'].data['label'][0])
+        print("Frequency weight on first ('application', 'uses', 'syscall') edge:", hetero_graph.edges['uses', 'syscall'].data['frequency'][0])
+
+        os.remove(data_file_path)
+        print("\nCleaned up dummy CSV file.")
