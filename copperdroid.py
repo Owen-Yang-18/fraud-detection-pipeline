@@ -113,7 +113,9 @@ def create_heterogeneous_graph(csv_path):
 class HeteroGraphSAGE(nn.Module):
     def __init__(self, g, in_size, hidden_size, out_size):
         super().__init__()
-        self.embed = dglnn.HeteroEmbedding(g.num_nodes_dict, in_size)
+        num_nodes_dict = {ntype: g.num_nodes(ntype) for ntype in g.ntypes}
+        self.embed = dglnn.HeteroEmbedding(num_nodes_dict, in_size)
+        
         self.conv1 = dglnn.HeteroGraphConv({
             rel: dglnn.SAGEConv(in_size, hidden_size, 'mean', feat_drop=0.2)
             for rel in g.etypes
@@ -131,13 +133,13 @@ class HeteroGraphSAGE(nn.Module):
         h = self.conv2(blocks[1], h)
         return self.classify(h['application'])
 
-    def inference(self, g):
+    def inference(self, g, device):
         """Full-graph inference for evaluation."""
-        # Layer 1
-        x = self.embed(g.ntypes)
+        # The embedding layer needs a dictionary mapping node type to node IDs.
+        x = self.embed({ntype: g.nodes(ntype).to(device) for ntype in g.ntypes})
+        # The graph convolutions can be performed on the full graph.
         h = self.conv1(g, x)
         h = {k: F.relu(v) for k, v in h.items()}
-        # Layer 2
         h = self.conv2(g, h)
         return self.classify(h['application'])
 
@@ -146,11 +148,11 @@ class HeteroGraphSAGE(nn.Module):
 #  Training, Evaluation, and Hyperparameter Tuning
 # ===================================================================
 
-def evaluate(model, graph, labels, mask, loss_fn):
+def evaluate(model, graph, labels, mask, loss_fn, device):
     """Evaluate model performance on a given dataset using full-graph inference."""
     model.eval()
     with torch.no_grad():
-        logits = model.inference(graph) # Use the inference method
+        logits = model.inference(graph, device) # Use the inference method
         loss = loss_fn(logits[mask], labels[mask])
         _, indices = torch.max(logits[mask], dim=1)
         accuracy = accuracy_score(labels[mask].cpu(), indices.cpu())
@@ -173,7 +175,7 @@ def plot_confusion_matrix(y_true, y_pred, class_names, fold):
 def plot_roc_auc(y_true, y_score, n_classes, fold):
     """Plots and saves a multiclass ROC AUC curve."""
     y_true_bin = label_binarize(y_true, classes=range(n_classes))
-    if y_true_bin.shape[1] == 1: # Handle binary case if it occurs
+    if n_classes > 1 and y_true_bin.shape[1] == 1:
         y_true_bin = np.hstack((1 - y_true_bin, y_true_bin))
 
     fpr = dict()
@@ -202,30 +204,33 @@ def plot_roc_auc(y_true, y_score, n_classes, fold):
     print(f"Saved ROC AUC curve to {filename}")
 
 
-def objective(trial, g, labels, train_sampler, train_dataloader, val_idx):
+def objective(trial, g, labels, train_dataloader, val_idx, device):
     """Optuna objective function for hyperparameter tuning."""
     embed_size = trial.suggest_categorical('embed_size', [32, 64, 128])
     hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
-    lr = trial.suggest_loguniform('lr', 1e-3, 1e-1)
+    # FIX: Use suggest_float with log=True instead of deprecated suggest_loguniform
+    lr = trial.suggest_float('lr', 1e-3, 1e-1, log=True)
     epochs = 30
     
     num_classes = len(labels.unique())
-    model = HeteroGraphSAGE(g, embed_size, hidden_size, num_classes)
+    model = HeteroGraphSAGE(g, embed_size, hidden_size, num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
     for epoch in range(epochs):
         model.train()
         for input_nodes, output_nodes, blocks in train_dataloader:
+            blocks = [b.to(device) for b in blocks]
             x = model.embed(blocks[0].srcdata[dgl.NID])
             y_hat = model(blocks, x)
-            loss = loss_fn(y_hat, blocks[-1].dstdata['label']['application'])
+            y = blocks[-1].dstdata['label']['application']
+            loss = loss_fn(y_hat, y)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
     
     # Evaluation uses full-graph inference
-    val_loss, val_acc, val_f1, _, _ = evaluate(model, g, labels, val_idx, loss_fn)
+    val_loss, val_acc, val_f1, _, _ = evaluate(model, g, labels, val_idx, loss_fn, device)
     return val_f1
 
 # ===================================================================
@@ -235,51 +240,58 @@ def objective(trial, g, labels, train_sampler, train_dataloader, val_idx):
 if __name__ == '__main__':
     print("--- Malware Classification GNN Training ---")
     
-    # 1. Prepare Data and Graph
+    # --- 1. Setup Device (GPU/CPU) ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # --- 2. Prepare Data and Graph ---
     data_file = create_dummy_frequency_csv()
     graph = create_heterogeneous_graph(data_file)
-    
+    # Move graph and its data to the selected device
+    graph = graph.to(device)
     app_labels = graph.nodes['application'].data['label']
     num_app_nodes = graph.num_nodes('application')
     
-    # 2. Setup K-Fold Cross-Validation
+    # --- 3. Setup K-Fold Cross-Validation ---
     N_SPLITS = 5
+    # K-fold needs CPU numpy arrays for splitting
     skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
     
     all_fold_metrics = []
     
     print(f"\nStarting {N_SPLITS}-Fold Cross-Validation...")
     
-    for fold, (train_idx, test_idx) in enumerate(skf.split(np.arange(num_app_nodes), app_labels)):
+    # K-Fold requires numpy array for splitting, so move labels to CPU for this step
+    for fold, (train_idx, test_idx) in enumerate(skf.split(np.arange(num_app_nodes), app_labels.cpu().numpy())):
         print(f"\n===== FOLD {fold+1}/{N_SPLITS} =====")
         
         train_idx_tensor = torch.tensor(train_idx, dtype=torch.long)
         test_idx_tensor = torch.tensor(test_idx, dtype=torch.long)
         
-        # 3. Create DataLoaders and Sampler for this fold
+        # --- 4. Create DataLoaders and Sampler for this fold ---
         sampler = dgl.dataloading.NeighborSampler([4, 4]) # 2 layers, 4 neighbors each
         train_dataloader = dgl.dataloading.DataLoader(
             graph, {'application': train_idx_tensor}, sampler,
             batch_size=128, shuffle=True, drop_last=False, num_workers=0)
 
-        # 4. Hyperparameter Tuning with Optuna for this fold
+        # --- 5. Hyperparameter Tuning with Optuna for this fold ---
         print("--- Running Hyperparameter Tuning (Optuna) ---")
-        sub_train_idx, sub_val_idx = train_test_split(train_idx, test_size=0.2, random_state=42, stratify=app_labels[train_idx])
+        sub_train_idx, sub_val_idx = train_test_split(train_idx, test_size=0.2, random_state=42, stratify=app_labels[train_idx].cpu().numpy())
         sub_train_dataloader = dgl.dataloading.DataLoader(
-            graph, {'application': sub_train_idx}, sampler,
+            graph, {'application': torch.tensor(sub_train_idx)}, sampler,
             batch_size=128, shuffle=True, drop_last=False, num_workers=0)
         
         study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-        study.optimize(lambda trial: objective(trial, graph, app_labels, sampler, sub_train_dataloader, sub_val_idx), n_trials=20)
+        study.optimize(lambda trial: objective(trial, graph, app_labels, sub_train_dataloader, sub_val_idx, device), n_trials=20)
         
         best_params = study.best_params
         print(f"Best trial for fold {fold+1}: Value (F1 Score): {study.best_value:.4f}, Params: {best_params}")
 
-        # 5. Train Final Model for this fold with Best Hyperparameters
+        # --- 6. Train Final Model for this fold with Best Hyperparameters ---
         print("\n--- Training Final Model for Fold ---")
         num_classes = len(app_labels.unique())
         class_names = [f'Class {i}' for i in range(num_classes)]
-        final_model = HeteroGraphSAGE(graph, best_params['embed_size'], best_params['hidden_size'], num_classes)
+        final_model = HeteroGraphSAGE(graph, best_params['embed_size'], best_params['hidden_size'], num_classes).to(device)
         optimizer = torch.optim.Adam(final_model.parameters(), lr=best_params['lr'])
         loss_fn = nn.CrossEntropyLoss()
         
@@ -288,9 +300,11 @@ if __name__ == '__main__':
             final_model.train()
             total_loss = 0
             for step, (input_nodes, output_nodes, blocks) in enumerate(train_dataloader):
+                blocks = [b.to(device) for b in blocks]
                 x = final_model.embed(blocks[0].srcdata[dgl.NID])
                 y_hat = final_model(blocks, x)
-                loss = loss_fn(y_hat, blocks[-1].dstdata['label']['application'])
+                y = blocks[-1].dstdata['label']['application']
+                loss = loss_fn(y_hat, y)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -299,22 +313,25 @@ if __name__ == '__main__':
             if (epoch + 1) % 10 == 0:
                 print(f"Epoch {epoch+1:03d}/{EPOCHS_FINAL} | Avg Loss: {total_loss / (step + 1):.4f}")
 
-        # 6. Evaluate on the Test Set for this fold
-        test_loss, test_acc, test_f1, test_logits, test_preds = evaluate(final_model, graph, app_labels, test_idx_tensor, loss_fn)
+        # --- 7. Evaluate on the Test Set for this fold ---
+        test_loss, test_acc, test_f1, test_logits, test_preds = evaluate(final_model, graph, app_labels, test_idx_tensor, loss_fn, device)
         print(f"\n--- Evaluation for Fold {fold+1} ---")
         print(f"Test Accuracy: {test_acc:.4f}")
         print(f"Test F1-Score (Macro): {test_f1:.4f}")
         
         all_fold_metrics.append({'acc': test_acc, 'f1': test_f1})
 
-        # 7. Generate and save plots for this fold
+        # --- 8. Generate and save plots for this fold ---
         print("\n--- Generating Evaluation Plots ---")
-        plot_confusion_matrix(app_labels[test_idx_tensor].cpu(), test_preds.cpu(), class_names, fold)
-        
-        y_score = F.softmax(test_logits, dim=1)
-        plot_roc_auc(app_labels[test_idx_tensor].cpu(), y_score.cpu(), num_classes, fold)
+        # Move data to CPU for scikit-learn and matplotlib
+        y_true_cpu = app_labels[test_idx_tensor].cpu()
+        y_pred_cpu = test_preds.cpu()
+        y_score_cpu = F.softmax(test_logits, dim=1).cpu()
 
-    # 8. Report Final Averaged Results
+        plot_confusion_matrix(y_true_cpu, y_pred_cpu, class_names, fold)
+        plot_roc_auc(y_true_cpu, y_score_cpu, num_classes, fold)
+
+    # --- 9. Report Final Averaged Results ---
     print("\n\n===== FINAL CROSS-VALIDATION RESULTS =====")
     avg_acc = np.mean([m['acc'] for m in all_fold_metrics])
     std_acc = np.std([m['acc'] for m in all_fold_metrics])
