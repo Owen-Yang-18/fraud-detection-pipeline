@@ -8,7 +8,7 @@ import numpy as np
 import os
 import random
 import optuna
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import f1_score, accuracy_score, confusion_matrix, roc_curve, auc
 from sklearn.preprocessing import label_binarize
 import matplotlib.pyplot as plt
@@ -124,21 +124,33 @@ class HeteroGraphSAGE(nn.Module):
         }, aggregate='sum')
         self.classify = nn.Linear(hidden_size, out_size)
 
-    def forward(self, g, inputs=None):
-        h = self.conv1(g, self.embed(g.ntypes))
+    def forward(self, blocks, x):
+        """Forward pass for minibatch training."""
+        h = self.conv1(blocks[0], x)
         h = {k: F.relu(v) for k, v in h.items()}
+        h = self.conv2(blocks[1], h)
+        return self.classify(h['application'])
+
+    def inference(self, g):
+        """Full-graph inference for evaluation."""
+        # Layer 1
+        x = self.embed(g.ntypes)
+        h = self.conv1(g, x)
+        h = {k: F.relu(v) for k, v in h.items()}
+        # Layer 2
         h = self.conv2(g, h)
         return self.classify(h['application'])
+
 
 # ===================================================================
 #  Training, Evaluation, and Hyperparameter Tuning
 # ===================================================================
 
 def evaluate(model, graph, labels, mask, loss_fn):
-    """Evaluate model performance on a given dataset."""
+    """Evaluate model performance on a given dataset using full-graph inference."""
     model.eval()
     with torch.no_grad():
-        logits = model(graph)
+        logits = model.inference(graph) # Use the inference method
         loss = loss_fn(logits[mask], labels[mask])
         _, indices = torch.max(logits[mask], dim=1)
         accuracy = accuracy_score(labels[mask].cpu(), indices.cpu())
@@ -161,7 +173,9 @@ def plot_confusion_matrix(y_true, y_pred, class_names, fold):
 def plot_roc_auc(y_true, y_score, n_classes, fold):
     """Plots and saves a multiclass ROC AUC curve."""
     y_true_bin = label_binarize(y_true, classes=range(n_classes))
-    
+    if y_true_bin.shape[1] == 1: # Handle binary case if it occurs
+        y_true_bin = np.hstack((1 - y_true_bin, y_true_bin))
+
     fpr = dict()
     tpr = dict()
     roc_auc = dict()
@@ -188,12 +202,12 @@ def plot_roc_auc(y_true, y_score, n_classes, fold):
     print(f"Saved ROC AUC curve to {filename}")
 
 
-def objective(trial, g, labels, train_idx, val_idx):
+def objective(trial, g, labels, train_sampler, train_dataloader, val_idx):
     """Optuna objective function for hyperparameter tuning."""
     embed_size = trial.suggest_categorical('embed_size', [32, 64, 128])
     hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
     lr = trial.suggest_loguniform('lr', 1e-3, 1e-1)
-    epochs = 50
+    epochs = 30
     
     num_classes = len(labels.unique())
     model = HeteroGraphSAGE(g, embed_size, hidden_size, num_classes)
@@ -202,12 +216,15 @@ def objective(trial, g, labels, train_idx, val_idx):
 
     for epoch in range(epochs):
         model.train()
-        logits = model(g)
-        loss = loss_fn(logits[train_idx], labels[train_idx])
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        for input_nodes, output_nodes, blocks in train_dataloader:
+            x = model.embed(blocks[0].srcdata[dgl.NID])
+            y_hat = model(blocks, x)
+            loss = loss_fn(y_hat, blocks[-1].dstdata['label']['application'])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
     
+    # Evaluation uses full-graph inference
     val_loss, val_acc, val_f1, _, _ = evaluate(model, g, labels, val_idx, loss_fn)
     return val_f1
 
@@ -239,22 +256,26 @@ if __name__ == '__main__':
         train_idx_tensor = torch.tensor(train_idx, dtype=torch.long)
         test_idx_tensor = torch.tensor(test_idx, dtype=torch.long)
         
-        # 3. Hyperparameter Tuning with Optuna for this fold
+        # 3. Create DataLoaders and Sampler for this fold
+        sampler = dgl.dataloading.NeighborSampler([4, 4]) # 2 layers, 4 neighbors each
+        train_dataloader = dgl.dataloading.DataLoader(
+            graph, {'application': train_idx_tensor}, sampler,
+            batch_size=128, shuffle=True, drop_last=False, num_workers=0)
+
+        # 4. Hyperparameter Tuning with Optuna for this fold
         print("--- Running Hyperparameter Tuning (Optuna) ---")
-        # Use a subset of the training data for validation during HPO to speed it up
         sub_train_idx, sub_val_idx = train_test_split(train_idx, test_size=0.2, random_state=42, stratify=app_labels[train_idx])
+        sub_train_dataloader = dgl.dataloading.DataLoader(
+            graph, {'application': sub_train_idx}, sampler,
+            batch_size=128, shuffle=True, drop_last=False, num_workers=0)
         
         study = optuna.create_study(direction='maximize', pruner=optuna.pruners.MedianPruner())
-        study.optimize(lambda trial: objective(trial, graph, app_labels, sub_train_idx, sub_val_idx), n_trials=20)
+        study.optimize(lambda trial: objective(trial, graph, app_labels, sampler, sub_train_dataloader, sub_val_idx), n_trials=20)
         
         best_params = study.best_params
-        print(f"Best trial for fold {fold+1}:")
-        print(f"  Value (F1 Score): {study.best_value:.4f}")
-        print("  Params: ")
-        for key, value in best_params.items():
-            print(f"    {key}: {value}")
+        print(f"Best trial for fold {fold+1}: Value (F1 Score): {study.best_value:.4f}, Params: {best_params}")
 
-        # 4. Train Final Model for this fold with Best Hyperparameters
+        # 5. Train Final Model for this fold with Best Hyperparameters
         print("\n--- Training Final Model for Fold ---")
         num_classes = len(app_labels.unique())
         class_names = [f'Class {i}' for i in range(num_classes)]
@@ -262,19 +283,23 @@ if __name__ == '__main__':
         optimizer = torch.optim.Adam(final_model.parameters(), lr=best_params['lr'])
         loss_fn = nn.CrossEntropyLoss()
         
-        EPOCHS_FINAL = 100
+        EPOCHS_FINAL = 50
         for epoch in range(EPOCHS_FINAL):
             final_model.train()
-            logits = final_model(graph)
-            loss = loss_fn(logits[train_idx_tensor], app_labels[train_idx_tensor])
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            total_loss = 0
+            for step, (input_nodes, output_nodes, blocks) in enumerate(train_dataloader):
+                x = final_model.embed(blocks[0].srcdata[dgl.NID])
+                y_hat = final_model(blocks, x)
+                loss = loss_fn(y_hat, blocks[-1].dstdata['label']['application'])
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
             
-            if (epoch + 1) % 20 == 0:
-                print(f"Epoch {epoch+1:03d}/{EPOCHS_FINAL} | Loss: {loss.item():.4f}")
+            if (epoch + 1) % 10 == 0:
+                print(f"Epoch {epoch+1:03d}/{EPOCHS_FINAL} | Avg Loss: {total_loss / (step + 1):.4f}")
 
-        # 5. Evaluate on the Test Set for this fold
+        # 6. Evaluate on the Test Set for this fold
         test_loss, test_acc, test_f1, test_logits, test_preds = evaluate(final_model, graph, app_labels, test_idx_tensor, loss_fn)
         print(f"\n--- Evaluation for Fold {fold+1} ---")
         print(f"Test Accuracy: {test_acc:.4f}")
@@ -282,14 +307,14 @@ if __name__ == '__main__':
         
         all_fold_metrics.append({'acc': test_acc, 'f1': test_f1})
 
-        # 6. Generate and save plots for this fold
+        # 7. Generate and save plots for this fold
         print("\n--- Generating Evaluation Plots ---")
         plot_confusion_matrix(app_labels[test_idx_tensor].cpu(), test_preds.cpu(), class_names, fold)
         
         y_score = F.softmax(test_logits, dim=1)
         plot_roc_auc(app_labels[test_idx_tensor].cpu(), y_score.cpu(), num_classes, fold)
 
-    # 7. Report Final Averaged Results
+    # 8. Report Final Averaged Results
     print("\n\n===== FINAL CROSS-VALIDATION RESULTS =====")
     avg_acc = np.mean([m['acc'] for m in all_fold_metrics])
     std_acc = np.std([m['acc'] for m in all_fold_metrics])
