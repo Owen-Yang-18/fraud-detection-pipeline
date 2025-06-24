@@ -286,6 +286,7 @@ import numpy as np
 import dgl
 import torch
 import os
+import random
 from pyvis.network import Network
 
 def create_dummy_frequency_csv(num_samples=100):
@@ -345,7 +346,7 @@ def classify_feature_name(name):
 def create_heterogeneous_graph(csv_path):
     """
     Processes a frequency-based CSV into a DGL heterogeneous graph and
-    returns both the graph and the DataFrame used to create it.
+    returns the graph, DataFrame, and lists of action nodes.
     """
     print(f"\n--- Starting DGL Graph Construction from {csv_path} ---")
 
@@ -410,23 +411,27 @@ def create_heterogeneous_graph(csv_path):
     g.edges[('composite_behavior', 'exhibited_by', 'application')].data['frequency'] = torch.tensor(composite_freq, dtype=torch.float32)
 
     print("--- DGL Graph construction complete! ---")
-    return g, df # REFACTOR: Return the dataframe for reuse
+    # REFACTOR: Return action lists for reuse
+    return g, df, syscall_nodes, binder_nodes, composite_nodes
 
-def visualize_heterogeneous_graph(df):
+def visualize_heterogeneous_graph(df, all_syscalls, all_binders, all_composites):
     """
-    Builds an interactive pyvis visualization from a pre-loaded DataFrame.
+    Builds an interactive pyvis visualization from a pre-loaded DataFrame and
+    pre-computed lists of action nodes.
     """
     print(f"\n--- Starting Pyvis Visualization ---")
 
-    # 1. REFACTOR: Use the passed DataFrame directly, no need to load from file.
+    # 1. Use the passed DataFrame directly
     print("Step 1: Using pre-loaded data...")
 
-    # 2. Define Subsets for lightweight visualization
+    # 2. REFACTOR: Randomly sample subsets from the provided action lists
     print("Step 2: Subsetting data for visualization...")
-    syscall_subset = ['read', 'write', 'execve']
-    binder_subset = ['sendSMS', 'getDeviceId']
-    composite_subset = ['NETWORK_WRITE_EXEC']
+    
+    syscall_subset = random.sample(all_syscalls, k=min(len(all_syscalls), 3))
+    binder_subset = random.sample(all_binders, k=min(len(all_binders), 2))
+    composite_subset = random.sample(all_composites, k=min(len(all_composites), 2))
     action_subset = syscall_subset + binder_subset + composite_subset
+    
     app_subset_df = df.groupby('Class').head(10)
 
     # 3. Setup Pyvis Network and Color Mappings
@@ -481,16 +486,15 @@ def visualize_heterogeneous_graph(df):
 if __name__ == '__main__':
     data_file_path = create_dummy_frequency_csv()
     
-    # 1. Create the DGL graph and get the dataframe in return
-    dgl_graph, loaded_df = create_heterogeneous_graph(data_file_path) # REFACTOR
+    # 1. Create the DGL graph and get the dataframe and action lists in return
+    dgl_graph, loaded_df, syscalls, binders, composites = create_heterogeneous_graph(data_file_path) # REFACTOR
     if dgl_graph:
         print("\n--- DGL Graph Summary ---")
         print(dgl_graph)
     
-    # 2. Create the Pyvis visualization by passing the loaded dataframe
-    visualize_heterogeneous_graph(loaded_df) # REFACTOR
+    # 2. Create the Pyvis visualization by passing the loaded data
+    visualize_heterogeneous_graph(loaded_df, syscalls, binders, composites) # REFACTOR
 
     # --- Cleanup ---
     os.remove(data_file_path)
     print(f"\nCleaned up dummy CSV file. Please open 'heterogeneous_graph_visualization.html' to see the graph.")
-
