@@ -130,7 +130,8 @@ def merge_pkl_files_batch_approach(
     input_folder: str, 
     output_folder: str, 
     files_per_batch: int = 100,
-    records_per_chunk: int = 100000
+    records_per_chunk: int = 100000,
+    save_as_chunks: bool = True
 ) -> None:
     """
     Alternative approach: Merge in batches to avoid file handle limits.
@@ -140,6 +141,7 @@ def merge_pkl_files_batch_approach(
         output_folder: Output folder for intermediate and final files
         files_per_batch: Number of files to merge at once
         records_per_chunk: Records per output chunk
+        save_as_chunks: If True, save final result as separate chunk files
     """
     os.makedirs(output_folder, exist_ok=True)
     pkl_files = list(Path(input_folder).glob("*.pkl"))
@@ -167,14 +169,90 @@ def merge_pkl_files_batch_approach(
     
     # Phase 2: Merge all batch files
     print(f"Merging {len(batch_files)} batch files into final result")
-    final_output = os.path.join(output_folder, "final_merged.pkl")
-    _merge_batch(batch_files, final_output, records_per_chunk)
+    
+    if save_as_chunks:
+        # Save as separate chunk files
+        _merge_to_chunks(batch_files, output_folder, records_per_chunk)
+    else:
+        # Save as single file
+        final_output = os.path.join(output_folder, "final_merged.pkl")
+        _merge_batch(batch_files, final_output, records_per_chunk)
     
     # Clean up intermediate files
     for batch_file in batch_files:
         os.remove(batch_file)
     
     print("Batch merge complete!")
+
+
+def _merge_to_chunks(file_list: list, output_folder: str, chunk_size: int) -> None:
+    """Merge files and save as separate chunk files."""
+    heap = []
+    iterators = []
+    
+    # Open files and initialize heap
+    for i, filepath in enumerate(file_list):
+        try:
+            iterator = PickleFileIterator(str(filepath))
+            iterator.__enter__()
+            iterators.append(iterator)
+            
+            first_item = next(iterator)
+            timestamp, action_name = first_item
+            heapq.heappush(heap, (timestamp, i, action_name))
+            
+        except (StopIteration, EOFError):
+            if iterator:
+                iterator.__exit__(None, None, None)
+            continue
+    
+    # Merge and save as chunks
+    merged_results = []
+    chunk_number = 0
+    total_processed = 0
+    
+    try:
+        while heap:
+            timestamp, file_idx, action_name = heapq.heappop(heap)
+            merged_results.append((timestamp, action_name))
+            total_processed += 1
+            
+            # Save chunk when buffer is full
+            if len(merged_results) >= chunk_size:
+                chunk_filename = os.path.join(output_folder, f"chunk_{chunk_number:06d}.pkl")
+                with open(chunk_filename, 'wb') as chunk_file:
+                    pickle.dump(merged_results, chunk_file)
+                
+                print(f"Saved chunk {chunk_number}: {len(merged_results)} records")
+                merged_results = []
+                chunk_number += 1
+                
+                if total_processed % 50000 == 0:
+                    print(f"Processed {total_processed} records...")
+            
+            try:
+                next_item = next(iterators[file_idx])
+                next_timestamp, next_action_name = next_item
+                heapq.heappush(heap, (next_timestamp, file_idx, next_action_name))
+            except StopIteration:
+                pass
+        
+        # Save final chunk if there are remaining results
+        if merged_results:
+            chunk_filename = os.path.join(output_folder, f"chunk_{chunk_number:06d}.pkl")
+            with open(chunk_filename, 'wb') as chunk_file:
+                pickle.dump(merged_results, chunk_file)
+            print(f"Saved final chunk {chunk_number}: {len(merged_results)} records")
+            chunk_number += 1
+        
+        print(f"Created {chunk_number} chunk files with {total_processed} total records")
+                
+    finally:
+        for iterator in iterators:
+            try:
+                iterator.__exit__(None, None, None)
+            except:
+                pass
 
 
 def _merge_batch(file_list: list, output_file: str, chunk_size: int) -> None:
@@ -237,19 +315,29 @@ if __name__ == "__main__":
     #     output_file="merged_output.pkl"
     # )
     
-    # Approach 2: Batch processing (recommended for large number of files)
+    # Approach 2a: Batch processing with separate chunk files (recommended)
     merge_pkl_files_batch_approach(
         input_folder="path/to/pkl/files",
         output_folder="output",
-        files_per_batch=50,  # Adjust based on your system limits
-        records_per_chunk=100000
+        files_per_batch=50,
+        records_per_chunk=100000,
+        save_as_chunks=True  # Creates chunk_000000.pkl, chunk_000001.pkl, etc.
     )
+    
+    # Approach 2b: Batch processing with single output file
+    # merge_pkl_files_batch_approach(
+    #     input_folder="path/to/pkl/files",
+    #     output_folder="output", 
+    #     files_per_batch=50,
+    #     records_per_chunk=100000,
+    #     save_as_chunks=False  # Creates single final_merged.pkl
+    # )
 
 
 # Utility function to read the merged results
 def read_merged_results(filepath: str) -> Iterator[Tuple[Any, str]]:
     """
-    Generator to read merged results without loading everything into memory.
+    Generator to read merged results from single file without loading everything into memory.
     """
     with open(filepath, 'rb') as f:
         try:
@@ -261,11 +349,30 @@ def read_merged_results(filepath: str) -> Iterator[Tuple[Any, str]]:
             pass
 
 
+def read_chunk_results(chunk_folder: str) -> Iterator[Tuple[Any, str]]:
+    """
+    Generator to read merged results from chunk files in order.
+    """
+    chunk_files = sorted(Path(chunk_folder).glob("chunk_*.pkl"))
+    
+    for chunk_file in chunk_files:
+        with open(chunk_file, 'rb') as f:
+            chunk_data = pickle.load(f)
+            for item in chunk_data:
+                yield item
+
+
 # Example of reading results
-def print_sample_results(filepath: str, num_samples: int = 10):
+def print_sample_results(filepath_or_folder: str, num_samples: int = 10, is_chunks: bool = True):
     """Print first few results to verify merge worked correctly."""
     print(f"First {num_samples} merged records:")
-    for i, (timestamp, action_name) in enumerate(read_merged_results(filepath)):
+    
+    if is_chunks:
+        iterator = read_chunk_results(filepath_or_folder)
+    else:
+        iterator = read_merged_results(filepath_or_folder)
+    
+    for i, (timestamp, action_name) in enumerate(iterator):
         if i >= num_samples:
             break
         print(f"  {timestamp}: {action_name}")
