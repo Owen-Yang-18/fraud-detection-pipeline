@@ -143,3 +143,62 @@ def main(argv: List[str]) -> None:
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+
+
+#!/usr/bin/env python3
+"""
+Aggregate many per-file pickles into one grand list.
+
+Each input pickle must contain a Python object (typically a list or other
+serialisable data).  The script concatenates them in filename order, closes
+each file immediately after reading, and optionally writes the combined
+result back to disk.
+
+Author : ChatGPT (o3) — 25 Jun 2025 — MIT
+"""
+from __future__ import annotations
+import argparse, logging, pickle, sys
+from pathlib import Path
+from typing import Any, List
+
+def load_all_pickles(pickle_paths: List[Path]) -> List[Any]:
+    """Return one grand list containing the contents of *pickle_paths*."""
+    grand: List[Any] = []
+    for p in pickle_paths:
+        logging.info("loading %s", p.name)
+        # with-block guarantees the file is closed promptly  ⤵
+        with p.open("rb") as fh:                              # cite: docs/StackOverflow
+            obj = pickle.load(fh)                              # cite: DigitalOcean/DataCamp
+        grand.extend(obj if isinstance(obj, list) else [obj])
+    return grand
+
+def main(argv: List[str]) -> None:
+    parser = argparse.ArgumentParser(
+        description="Concatenate many pickle files into one grand list")
+    parser.add_argument("--input_dir", required=True, type=Path,
+                        help="Directory containing *.pkl files")
+    parser.add_argument("--glob", default="*.pkl",
+                        help="Filename pattern (default *.pkl)")
+    parser.add_argument("--output_pickle", type=Path,
+                        help="Optional path to write the combined list")
+    args = parser.parse_args(argv)
+
+    pickle_files = sorted(args.input_dir.glob(args.glob))
+    if not pickle_files:
+        logging.error("No files matching %s in %s", args.glob, args.input_dir)
+        sys.exit(1)
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(levelname)s  %(message)s")
+    grand = load_all_pickles(pickle_files)
+    logging.info("loaded %d pickle files → %d total records",
+                 len(pickle_files), len(grand))
+
+    if args.output_pickle:
+        with args.output_pickle.open("wb") as fh:
+            pickle.dump(grand, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        logging.info("wrote combined pickle → %s", args.output_pickle)
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+
