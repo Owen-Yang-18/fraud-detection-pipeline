@@ -1,222 +1,271 @@
-import os
 import pickle
-import time
-import math
 import heapq
-from multiprocessing import Pool, cpu_count
+import os
+from pathlib import Path
+from typing import Iterator, Tuple, Any
+import gc
 
-# ===================================================================
-#  Memory-Efficient Dynamic Graph Data Preparation
-# ===================================================================
 
-def classify_action_name(name):
-    """Classifies an action name as syscall, binder, or composite."""
-    if name.islower():
-        return 'syscall'
-    if not name.islower() and not name.isupper():
-        return 'binder'
-    return 'composite_behavior'
-
-def _pass1_build_node_maps(data_directory):
-    """
-    Pass 1: Scans all files to build global node-to-ID mappings.
-    This is memory-efficient as it only stores unique names.
-    """
-    print("\n--- Pass 1: Building Node Mappings (Memory-Efficient) ---")
-    pkl_files = [f for f in os.listdir(data_directory) if f.endswith('.pkl')]
-    if not pkl_files:
-        raise FileNotFoundError(f"No .pkl files found in '{data_directory}'")
+class PickleFileIterator:
+    """Iterator wrapper for pickle files to handle exhausted files gracefully."""
+    
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self.file_handle = None
+        self.data = None
+        self.index = 0
+        self.exhausted = False
         
-    all_apks = sorted([os.path.splitext(f)[0] for f in pkl_files])
-    all_actions = set()
-
-    print(f"Scanning {len(pkl_files)} files to find all unique nodes...")
-    for i, pkl_file in enumerate(pkl_files):
-        if (i + 1) % 1000 == 0:
-            print(f"  ...scanned {i+1}/{len(pkl_files)} files for metadata...")
-        filepath = os.path.join(data_directory, pkl_file)
-        try:
-            with open(filepath, 'rb') as f:
-                events = pickle.load(f)
-                for _, action_name in events:
-                    all_actions.add(action_name)
-        except Exception as e:
-            print(f"Warning: Could not process file {pkl_file} for mapping. Error: {e}")
-
-    apk_map = {name: i for i, name in enumerate(all_apks)}
-    syscall_nodes = {name for name in all_actions if classify_action_name(name) == 'syscall'}
-    binder_nodes = {name for name in all_actions if classify_action_name(name) == 'binder'}
-    composite_nodes = {name for name in all_actions if classify_action_name(name) == 'composite_behavior'}
-
-    node_maps = {
-        'apk_map': apk_map,
-        'syscall_map': {name: i for i, name in enumerate(sorted(list(syscall_nodes)))},
-        'binder_map': {name: i for i, name in enumerate(sorted(list(binder_nodes)))},
-        'composite_map': {name: i for i, name in enumerate(sorted(list(composite_nodes)))}
-    }
-    
-    return node_maps
-
-def _pass2_process_single_file(args):
-    """
-    Pass 2 worker: Processes one pkl file. It converts event names to integer IDs
-    and sorts the events for that single file. This creates a small, sorted
-    temporary file that is ready for merging.
-    """
-    filepath, node_maps, temp_dir = args
-    apk_id = os.path.splitext(os.path.basename(filepath))[0]
-    
-    if apk_id not in node_maps['apk_map']: return None
-    apk_idx = node_maps['apk_map'][apk_id]
-    
-    try:
-        with open(filepath, 'rb') as f:
-            events = pickle.load(f)
-    except Exception: return None
-
-    processed_events = []
-    for timestamp, action_name in events:
-        action_type = classify_action_name(action_name)
-        if action_type == 'syscall' and action_name in node_maps['syscall_map']:
-            action_idx = node_maps['syscall_map'][action_name]
-        elif action_type == 'binder' and action_name in node_maps['binder_map']:
-            action_idx = node_maps['binder_map'][action_name]
-        elif action_type == 'composite_behavior' and action_name in node_maps['composite_map']:
-            action_idx = node_maps['composite_map'][action_name]
-        else: continue
+    def __enter__(self):
+        self.file_handle = open(self.filepath, 'rb')
+        self.data = pickle.load(self.file_handle)
+        return self
         
-        # Event format: (timestamp, source_id, dest_id, dest_type)
-        processed_events.append((timestamp, apk_idx, action_idx, action_type))
-
-    processed_events.sort(key=lambda x: x[0])
-
-    temp_filepath = os.path.join(temp_dir, f"{apk_id}.temp.pkl")
-    with open(temp_filepath, 'wb') as f:
-        pickle.dump(processed_events, f)
-    
-    return temp_filepath
-
-def _pass3_merge_and_save_chunks(temp_files, node_maps, output_directory, chunk_size=1000000):
-    """
-    Pass 3: Implements an external merge sort using a min-heap. This is the
-    most memory-efficient way to sort a dataset that is too large to fit in memory.
-    It reads the pre-sorted temp files and builds the final, globally-sorted chunks.
-    """
-    print("\n--- Pass 3: Merging All Files and Saving Final Chunks ---")
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-    
-    with open(os.path.join(output_directory, 'node_maps.pkl'), 'wb') as f:
-        pickle.dump(node_maps, f)
-    print(f"Saved global node mappings to '{os.path.join(output_directory, 'node_maps.pkl')}'")
-
-    min_heap = []
-    file_handlers = [open(f, 'rb') for f in temp_files]
-    event_iterators = [pickle.load(fh) for fh in file_handlers]
-
-    print("Initializing k-way merge with a min-heap to ensure global time order...")
-    for i, iterator in enumerate(event_iterators):
-        try:
-            first_event = iterator[0]
-            # Heap item: (timestamp, file_index, event_index_in_file)
-            heapq.heappush(min_heap, (first_event[0], i, 0))
-        except IndexError: continue
-
-    edge_data = {'app_syscall': [], 'app_binder': [], 'app_composite': []}
-    chunk_counters = {k: 0 for k in edge_data}
-    total_events_in_memory = 0
-    total_events_processed = 0
-
-    while min_heap:
-        ts, file_idx, event_idx = heapq.heappop(min_heap)
-        total_events_processed += 1
-        if total_events_processed % 500000 == 0:
-            print(f"  ...globally processed {total_events_processed} events...")
-
-        timestamp, src_id, dst_id, dst_type = event_iterators[file_idx][event_idx]
-        
-        if dst_type == 'syscall':
-            edge_data['app_syscall'].append((src_id, dst_id, timestamp))
-        elif dst_type == 'binder':
-            edge_data['app_binder'].append((src_id, dst_id, timestamp))
-        elif dst_type == 'composite_behavior':
-            edge_data['app_composite'].append((src_id, dst_id, timestamp))
-        total_events_in_memory += 1
-        
-        next_event_idx = event_idx + 1
-        if next_event_idx < len(event_iterators[file_idx]):
-            next_event = event_iterators[file_idx][next_event_idx]
-            heapq.heappush(min_heap, (next_event[0], file_idx, next_event_idx))
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file_handle:
+            self.file_handle.close()
             
-        if total_events_in_memory >= chunk_size:
-            print(f"  - Memory threshold reached. Flushing {total_events_in_memory} events to chunks...")
-            for edge_type, edge_list in edge_data.items():
-                if edge_list:
-                    chunk_filename = f"{edge_type}_edges_chunk_{chunk_counters[edge_type]}.pkl"
-                    with open(os.path.join(output_directory, chunk_filename), 'wb') as f:
-                        pickle.dump(edge_list, f)
-                    edge_data[edge_type] = []
-                    chunk_counters[edge_type] += 1
-            total_events_in_memory = 0
-    
-    print("Flushing final remaining events...")
-    for edge_type, edge_list in edge_data.items():
-        if edge_list:
-            chunk_filename = f"{edge_type}_edges_chunk_{chunk_counters[edge_type]}.pkl"
-            with open(os.path.join(output_directory, chunk_filename), 'wb') as f:
-                pickle.dump(edge_list, f)
-
-    for fh in file_handlers: fh.close()
-
-
-def prepare_graph_data(data_directory, output_directory="graph_data_chunks"):
-    """
-    Orchestrates the multi-pass, memory-efficient graph data preparation.
-    """
-    temp_dir = os.path.join(data_directory, "temp_processing")
-    if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+    def __iter__(self):
+        return self
         
+    def __next__(self):
+        if self.exhausted or self.index >= len(self.data):
+            self.exhausted = True
+            raise StopIteration
+        
+        item = self.data[self.index]
+        self.index += 1
+        return item
+
+
+def merge_pkl_files_heap_approach(
+    input_folder: str, 
+    output_file: str, 
+    chunk_size: int = 100000
+) -> None:
+    """
+    Merge sorted pkl files using heap-based k-way merge.
+    
+    Args:
+        input_folder: Path to folder containing pkl files
+        output_file: Output file path for merged results
+        chunk_size: Number of records to write at once
+    """
+    pkl_files = list(Path(input_folder).glob("*.pkl"))
+    
+    if not pkl_files:
+        print("No pkl files found!")
+        return
+    
+    print(f"Found {len(pkl_files)} pkl files to merge")
+    
+    # Initialize heap with first element from each file
+    heap = []
+    iterators = []
+    
+    # Open all files and get first elements
+    for i, pkl_file in enumerate(pkl_files):
+        try:
+            iterator = PickleFileIterator(str(pkl_file))
+            iterator.__enter__()
+            iterators.append(iterator)
+            
+            # Get first element
+            first_item = next(iterator)
+            timestamp, action_name = first_item
+            # Push (timestamp, file_index, action_name) to heap
+            heapq.heappush(heap, (timestamp, i, action_name))
+            
+        except (StopIteration, EOFError):
+            # File is empty, skip it
+            if iterator:
+                iterator.__exit__(None, None, None)
+            continue
+    
+    # Merge and write results
+    merged_results = []
+    total_processed = 0
+    
     try:
-        # Pass 1: Build global node maps. This is fast and low-memory.
-        node_maps = _pass1_build_node_maps(data_directory)
-        
-        # Pass 2: In parallel, create a small, sorted temp file for each input .pkl file.
-        # This reads each input file only ONCE.
-        print("\n--- Pass 2: Creating Per-File Sorted Chunks (Parallel) ---")
-        pkl_files = [os.path.join(data_directory, f) for f in os.listdir(data_directory) if f.endswith('.pkl')]
-        
-        pool_args = [(f, node_maps, temp_dir) for f in pkl_files]
-        with Pool(cpu_count()) as pool:
-            temp_files_created = pool.map(_pass2_process_single_file, pool_args)
-        
-        temp_files_created = [f for f in temp_files_created if f is not None]
-        print(f"Created {len(temp_files_created)} temporary sorted files.")
-
-        # Pass 3: Use a k-way merge (via a min-heap) to efficiently combine the sorted
-        # temp files into final, globally-sorted chunks. This avoids loading all data.
-        if temp_files_created:
-            _pass3_merge_and_save_chunks(temp_files_created, node_maps, output_directory)
-        else:
-            print("No temporary files were created, skipping merge step.")
-
+        with open(output_file, 'wb') as outfile:
+            while heap:
+                # Get smallest timestamp
+                timestamp, file_idx, action_name = heapq.heappop(heap)
+                merged_results.append((timestamp, action_name))
+                total_processed += 1
+                
+                # Write chunk to file when buffer is full
+                if len(merged_results) >= chunk_size:
+                    pickle.dump(merged_results, outfile)
+                    merged_results = []
+                    
+                    if total_processed % 50000 == 0:
+                        print(f"Processed {total_processed} records...")
+                
+                # Get next element from the same file
+                try:
+                    next_item = next(iterators[file_idx])
+                    next_timestamp, next_action_name = next_item
+                    heapq.heappush(heap, (next_timestamp, file_idx, next_action_name))
+                except StopIteration:
+                    # This file is exhausted, continue with others
+                    pass
+            
+            # Write remaining results
+            if merged_results:
+                pickle.dump(merged_results, outfile)
+                
     finally:
-        # Cleanup temporary files
-        print("\nCleaning up temporary directory...")
-        if os.path.exists(temp_dir):
-            for f in os.listdir(temp_dir):
-                os.remove(os.path.join(temp_dir, f))
-            os.rmdir(temp_dir)
+        # Clean up all file handles
+        for iterator in iterators:
+            try:
+                iterator.__exit__(None, None, None)
+            except:
+                pass
     
-    print("\n--- Unified Graph Data Preparation Complete! ---")
-    return output_directory
+    print(f"Merge complete! Processed {total_processed} total records")
 
-if __name__ == '__main__':
-    # You would replace 'apk_pkl_logs' with the path to your directory of 11,000 files
-    log_dir = "apk_pkl_logs"
-    output_dir = "graph_data_chunks"
-    
-    # prepare_graph_data(log_dir, output_directory=output_dir, num_chunks=100) # Example for real run
-    
-    print("This script is designed to run on a directory of .pkl files.")
-    print("A production run has been commented out. No dummy data will be created.")
 
+def merge_pkl_files_batch_approach(
+    input_folder: str, 
+    output_folder: str, 
+    files_per_batch: int = 100,
+    records_per_chunk: int = 100000
+) -> None:
+    """
+    Alternative approach: Merge in batches to avoid file handle limits.
+    
+    Args:
+        input_folder: Path to folder containing pkl files  
+        output_folder: Output folder for intermediate and final files
+        files_per_batch: Number of files to merge at once
+        records_per_chunk: Records per output chunk
+    """
+    os.makedirs(output_folder, exist_ok=True)
+    pkl_files = list(Path(input_folder).glob("*.pkl"))
+    
+    print(f"Found {len(pkl_files)} pkl files")
+    print(f"Processing in batches of {files_per_batch} files")
+    
+    # Phase 1: Merge files in batches
+    batch_files = []
+    batch_num = 0
+    
+    for i in range(0, len(pkl_files), files_per_batch):
+        batch = pkl_files[i:i + files_per_batch]
+        batch_output = os.path.join(output_folder, f"batch_{batch_num:04d}.pkl")
+        
+        print(f"Processing batch {batch_num + 1}: {len(batch)} files")
+        
+        # Merge this batch
+        _merge_batch(batch, batch_output, records_per_chunk)
+        batch_files.append(batch_output)
+        batch_num += 1
+        
+        # Force garbage collection
+        gc.collect()
+    
+    # Phase 2: Merge all batch files
+    print(f"Merging {len(batch_files)} batch files into final result")
+    final_output = os.path.join(output_folder, "final_merged.pkl")
+    _merge_batch(batch_files, final_output, records_per_chunk)
+    
+    # Clean up intermediate files
+    for batch_file in batch_files:
+        os.remove(batch_file)
+    
+    print("Batch merge complete!")
+
+
+def _merge_batch(file_list: list, output_file: str, chunk_size: int) -> None:
+    """Helper function to merge a batch of files."""
+    heap = []
+    iterators = []
+    
+    # Open files and initialize heap
+    for i, filepath in enumerate(file_list):
+        try:
+            iterator = PickleFileIterator(str(filepath))
+            iterator.__enter__()
+            iterators.append(iterator)
+            
+            first_item = next(iterator)
+            timestamp, action_name = first_item
+            heapq.heappush(heap, (timestamp, i, action_name))
+            
+        except (StopIteration, EOFError):
+            if iterator:
+                iterator.__exit__(None, None, None)
+            continue
+    
+    # Merge
+    merged_results = []
+    
+    try:
+        with open(output_file, 'wb') as outfile:
+            while heap:
+                timestamp, file_idx, action_name = heapq.heappop(heap)
+                merged_results.append((timestamp, action_name))
+                
+                if len(merged_results) >= chunk_size:
+                    pickle.dump(merged_results, outfile)
+                    merged_results = []
+                
+                try:
+                    next_item = next(iterators[file_idx])
+                    next_timestamp, next_action_name = next_item
+                    heapq.heappush(heap, (next_timestamp, file_idx, next_action_name))
+                except StopIteration:
+                    pass
+            
+            if merged_results:
+                pickle.dump(merged_results, outfile)
+                
+    finally:
+        for iterator in iterators:
+            try:
+                iterator.__exit__(None, None, None)
+            except:
+                pass
+
+
+# Example usage
+if __name__ == "__main__":
+    # Approach 1: Direct heap merge (if system can handle 12000 file handles)
+    # merge_pkl_files_heap_approach(
+    #     input_folder="path/to/pkl/files",
+    #     output_file="merged_output.pkl"
+    # )
+    
+    # Approach 2: Batch processing (recommended for large number of files)
+    merge_pkl_files_batch_approach(
+        input_folder="path/to/pkl/files",
+        output_folder="output",
+        files_per_batch=50,  # Adjust based on your system limits
+        records_per_chunk=100000
+    )
+
+
+# Utility function to read the merged results
+def read_merged_results(filepath: str) -> Iterator[Tuple[Any, str]]:
+    """
+    Generator to read merged results without loading everything into memory.
+    """
+    with open(filepath, 'rb') as f:
+        try:
+            while True:
+                chunk = pickle.load(f)
+                for item in chunk:
+                    yield item
+        except EOFError:
+            pass
+
+
+# Example of reading results
+def print_sample_results(filepath: str, num_samples: int = 10):
+    """Print first few results to verify merge worked correctly."""
+    print(f"First {num_samples} merged records:")
+    for i, (timestamp, action_name) in enumerate(read_merged_results(filepath)):
+        if i >= num_samples:
+            break
+        print(f"  {timestamp}: {action_name}")
