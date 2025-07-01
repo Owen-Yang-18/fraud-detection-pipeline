@@ -143,40 +143,85 @@ def main() -> None:
 
     counts = defaultdict(lambda: [0] * args.y_top)
 
-    from tqdm import tqdm
-    import itertools
+    # ------------------------------------------------------------------
+    # 1) PRE-LOAD each JSON exactly once (skip bad ones)
+    # ------------------------------------------------------------------
+    data_lists: List[List[Tuple[str, Tuple[List[int], Dict[str, List[int]]]]]] = []
+    for txt_paths in lists:
+        cur: List[Tuple[str, Tuple[List[int], Dict[str, List[int]]]]] = []
+        for path in txt_paths:
+            data = load_json(path)          # already warns & marks bad_files
+            if data is not None:            # only keep good files
+                cur.append((path, data))
+        if not cur:
+            print(f"[WARN] All JSONs in one list were invalid → skipping that list")
+        data_lists.append(cur)
 
-    # assume exactly two sub-lists ⇒ lists[0], lists[1]
-    list0, list1 = lists[0], lists[1]
+    if len(data_lists) < 2 or any(len(dl) == 0 for dl in data_lists[:2]):
+        sys.exit("Nothing to compare after pre-loading valid JSON files.")
+
+    # ------------------------------------------------------------------
+    # 2) PAIRWISE comparison using pre-loaded data
+    #    (assume exactly two lists: data_lists[0] vs data_lists[1])
+    # ------------------------------------------------------------------
+    list0, list1 = data_lists[0], data_lists[1]
     total_pairs = len(list0) * len(list1)
 
-    for json_a, json_b in tqdm(itertools.product(list0, list1),
-                            total=total_pairs,
-                            desc="Comparing JSON pairs"):
-    # # # compare every unordered pair of list-files
-    # # for idx_a, idx_b in itertools.combinations(range(len(lists)), 2):
-    #     for json_a in lists[idx_a]:
-    #         for json_b in lists[idx_b]:
-            data_a = load_json(json_a)
-            data_b = load_json(json_b)
-            if data_a is None or data_b is None:
-                continue  # skip if either file failed
+    from tqdm import tqdm
+    import itertools
+    for (path_a, (ts_a, freq_a)), (path_b, (ts_b, freq_b)) in tqdm(
+            itertools.product(list0, list1),
+            total=total_pairs,
+            desc="Comparing JSON pairs"):
+        # build union timeline once per pair
+        ts_union = sorted(set(ts_a) | set(ts_b))
+        names = set(freq_a) | set(freq_b)
 
-            ts_a, freq_a = data_a
-            ts_b, freq_b = data_b
+        # compute distances
+        dist_pairs = []
+        for name in names:
+            seq_a = align(ts_union, ts_a, freq_a.get(name, [0] * len(ts_a)))
+            seq_b = align(ts_union, ts_b, freq_b.get(name, [0] * len(ts_b)))
+            dist_pairs.append((name, metric_fn(seq_a, seq_b)))
 
-            ts_union = sorted(set(ts_a) | set(ts_b))
-            names = set(freq_a) | set(freq_b)
+        dist_pairs.sort(key=lambda t: t[1], reverse=True)
+        for rank_idx, (name, _) in enumerate(dist_pairs[: args.y_top]):
+            counts[name][rank_idx] += 1
 
-            dist_pairs = []
-            for name in names:
-                seq_a = align(ts_union, ts_a, freq_a.get(name, [0]*len(ts_a)))
-                seq_b = align(ts_union, ts_b, freq_b.get(name, [0]*len(ts_b)))
-                dist_pairs.append((name, metric_fn(seq_a, seq_b)))
+    # from tqdm import tqdm
+    # import itertools
 
-            dist_pairs.sort(key=lambda t: t[1], reverse=True)
-            for r, (name, _) in enumerate(dist_pairs[:args.y_top]):
-                counts[name][r] += 1
+    # # assume exactly two sub-lists ⇒ lists[0], lists[1]
+    # list0, list1 = lists[0], lists[1]
+    # total_pairs = len(list0) * len(list1)
+
+    # for json_a, json_b in tqdm(itertools.product(list0, list1),
+    #                         total=total_pairs,
+    #                         desc="Comparing JSON pairs"):
+    # # # # compare every unordered pair of list-files
+    # # # for idx_a, idx_b in itertools.combinations(range(len(lists)), 2):
+    # #     for json_a in lists[idx_a]:
+    # #         for json_b in lists[idx_b]:
+    #         data_a = load_json(json_a)
+    #         data_b = load_json(json_b)
+    #         if data_a is None or data_b is None:
+    #             continue  # skip if either file failed
+
+    #         ts_a, freq_a = data_a
+    #         ts_b, freq_b = data_b
+
+    #         ts_union = sorted(set(ts_a) | set(ts_b))
+    #         names = set(freq_a) | set(freq_b)
+
+    #         dist_pairs = []
+    #         for name in names:
+    #             seq_a = align(ts_union, ts_a, freq_a.get(name, [0]*len(ts_a)))
+    #             seq_b = align(ts_union, ts_b, freq_b.get(name, [0]*len(ts_b)))
+    #             dist_pairs.append((name, metric_fn(seq_a, seq_b)))
+
+    #         dist_pairs.sort(key=lambda t: t[1], reverse=True)
+    #         for r, (name, _) in enumerate(dist_pairs[:args.y_top]):
+    #             counts[name][r] += 1
 
     # output
     cols = [f"rank_{i+1}" for i in range(args.y_top)]
