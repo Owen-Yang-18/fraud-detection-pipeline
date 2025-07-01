@@ -1,23 +1,16 @@
 #!/usr/bin/env python3
 """
-Per-class summary statistics + multi-subplot histograms for a CSV dataset.
+Per-class summary statistics, multi-subplot histograms, and feature-separation
+ranking for a CSV dataset.
 
-Key points
-----------
-* Assumes the **last column** in the CSV is the class label.
-* All other numeric columns are treated as features.
-* For each feature, one figure (PNG) is produced:
-    └─ contains a subplot histogram for every class.
-* Bins are automatic (`numpy.histogram_bin_edges(..., bins='auto')`) unless
-  you supply `--bins N`.
-
-Usage examples
---------------
-python class_histograms.py data.csv
-python class_histograms.py data.csv --bins 40 --outdir plots --show
+Assumptions
+-----------
+* The CSV's **first row** holds column names.
+* The **last column** is the class label; all other numeric columns are features.
 """
 
 import argparse
+import itertools
 import math
 from pathlib import Path
 
@@ -26,66 +19,72 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
+# ───────────────────────────────────────── CLI ──────────────────────────────────
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Per-class histograms & stats")
     p.add_argument("csv", help="Path to input CSV file")
-    p.add_argument(
-        "--bins",
-        type=int,
-        default=None,
-        help="Manual bin count (omit for automatic bins per class)",
-    )
-    p.add_argument(
-        "--outdir",
-        default="plots",
-        help="Directory to write histogram PNGs (default: plots/)",
-    )
-    p.add_argument(
-        "--stats_file",
-        default=None,
-        help="Where to save mean±std table (default: <outdir>/stats.csv)",
-    )
-    p.add_argument(
-        "--show",
-        action="store_true",
-        help="Display figures instead of saving PNGs",
-    )
-    p.add_argument(
-        "--max_cols",
-        type=int,
-        default=3,
-        help="Maximum subplot columns in the grid (default: 3)",
-    )
+
+    p.add_argument("--bins", type=int, default=None,
+                   help="Manual bin count (omit for automatic bins)")
+    p.add_argument("--metric", choices=["js", "kl", "tv"], default="js",
+                   help="js (default) = Jensen–Shannon, kl = symmetric KL, tv = Total Variation")
+    p.add_argument("--outdir", default="plots",
+                   help="Directory to write PNGs + CSVs (default: plots/)")
+    p.add_argument("--stats_file", default=None,
+                   help="Custom path for mean±std CSV (default: <outdir>/stats.csv)")
+    p.add_argument("--rank_file", default=None,
+                   help="Custom path for feature-ranking CSV (default: <outdir>/feature_ranking.csv)")
+    p.add_argument("--show", action="store_true",
+                   help="Display figures instead of saving PNGs")
+    p.add_argument("--max_cols", type=int, default=3,
+                   help="Max subplot columns in a grid (default: 3)")
     return p.parse_args()
 
 
-def automatic_bins(data: np.ndarray, manual_bins: int | None) -> np.ndarray | int:
-    if manual_bins is not None:
-        return manual_bins
-    return np.histogram_bin_edges(data, bins="auto")
+# ───────────────────────────── distance helpers (JS / KL / TV) ──────────────────
+_EPS = 1e-12  # avoid log(0)
 
 
+def tv_distance(p: np.ndarray, q: np.ndarray) -> float:
+    return 0.5 * np.abs(p - q).sum()
+
+
+def symmetric_kl(p: np.ndarray, q: np.ndarray) -> float:
+    return 0.5 * (np.sum(p * np.log(p / q)) + np.sum(q * np.log(q / p)))
+
+
+def js_distance(p: np.ndarray, q: np.ndarray) -> float:
+    m = 0.5 * (p + q)
+    return 0.5 * (np.sum(p * np.log(p / m)) + np.sum(q * np.log(q / m)))
+
+
+_METRIC_FN = {"tv": tv_distance, "kl": symmetric_kl, "js": js_distance}
+
+
+# ─────────────────────────────────────── main ───────────────────────────────────
 def main() -> None:
     args = parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # ---------- Load data ----------
-    df = pd.read_csv(args.csv)
-    class_col = df.columns[-1]
+    # ── Load CSV (header row gives column names) ──
+    df = pd.read_csv(args.csv, header=0)
+    class_col = df.columns[-1]                       # label column
     class_values = sorted(df[class_col].dropna().unique())
-    n_classes = len(class_values)
-    if n_classes == 0:
+    if not class_values:
         raise ValueError("No class labels found in the last column.")
 
-    # Identify numeric features
+    # ── Identify numeric features ──
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    if class_col in numeric_cols:  # exclude label even if numeric
+    if class_col in numeric_cols:
         numeric_cols.remove(class_col)
     if not numeric_cols:
         raise ValueError("No numeric feature columns detected.")
 
-    # ---------- Compute mean & std ----------
+    print(f"\nFeatures ({len(numeric_cols)}): {numeric_cols}")
+    print(f"Classes  ({len(class_values)}): {class_values}\n")
+
+    # ── Per-class mean ± std ──
     stats = (
         df.groupby(class_col)[numeric_cols]
         .agg(["mean", "std"])
@@ -94,53 +93,70 @@ def main() -> None:
     )
     stats_path = Path(args.stats_file) if args.stats_file else outdir / "stats.csv"
     stats.to_csv(stats_path)
-    print(f"\nSaved summary statistics → {stats_path.resolve()}\n")
-    print(stats)
+    print(f"Saved summary statistics → {stats_path.resolve()}\n")
 
-    # ---------- Histogram figures ----------
+    # ── Histograms + separation metric ──
+    ranking = []
+    metric_fn = _METRIC_FN[args.metric]
+
     for col in numeric_cols:
-        # Determine subplot grid shape
-        ncols = min(n_classes, args.max_cols)
-        nrows = math.ceil(n_classes / ncols)
+        data_all = df[col].dropna().values
+        bins = (np.histogram_bin_edges(data_all, bins="auto")
+                if args.bins is None
+                else np.histogram_bin_edges(data_all, bins=args.bins))
 
-        # Create figure
-        fig, axes = plt.subplots(
-            nrows,
-            ncols,
-            figsize=(4 * ncols, 3.5 * nrows),
-            squeeze=False,
-        )
-        fig.suptitle(f"{col}: distributions by class", fontsize=14)
+        # Histograms as probability vectors
+        hist_prob = {}
+        for cls in class_values:
+            hist, _ = np.histogram(df.loc[df[class_col] == cls, col].dropna(), bins=bins)
+            hist = hist.astype(float) + _EPS
+            hist /= hist.sum()
+            hist_prob[cls] = hist
 
-        for idx, cls in enumerate(class_values):
-            r, c = divmod(idx, ncols)
+        # Average pairwise distance
+        dists = [metric_fn(hist_prob[c1], hist_prob[c2])
+                 for c1, c2 in itertools.combinations(class_values, 2)]
+        ranking.append((col, float(np.mean(dists))))
+
+        # Figure with subplots
+        n_cls = len(class_values)
+        ncols = min(n_cls, args.max_cols)
+        nrows = math.ceil(n_cls / ncols)
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(4 * ncols, 3.5 * nrows),
+                                 squeeze=False)
+        fig.suptitle(f"{col} — per-class distributions", fontsize=14)
+
+        for i, cls in enumerate(class_values):
+            r, c = divmod(i, ncols)
             ax = axes[r][c]
-            data = df.loc[df[class_col] == cls, col].dropna().values
-            if data.size == 0:
-                ax.axis("off")
-                ax.set_title(f"Class {cls} (no data)")
-                continue
-
-            bins = automatic_bins(data, args.bins)
-            ax.hist(data, bins=bins)
+            ax.hist(df.loc[df[class_col] == cls, col].dropna(), bins=bins if args.bins is None else args.bins)
             ax.set_title(f"Class {cls}")
             ax.set_xlabel(col)
             ax.set_ylabel("Freq")
 
-        # Hide any empty subplots (when n_classes % ncols != 0)
-        for j in range(n_classes, nrows * ncols):
-            r, c = divmod(j, ncols)
-            axes[r][c].axis("off")
+        # Hide unused subplots
+        for j in range(n_cls, nrows * ncols):
+            axes[divmod(j, ncols)].axis("off")
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave space for suptitle
-
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
         if args.show:
             plt.show()
         else:
-            out_path = outdir / f"{col}.png"
-            fig.savefig(out_path, dpi=150)
+            fig_path = outdir / f"{col}.png"
+            fig.savefig(fig_path, dpi=150)
             plt.close(fig)
-            print(f"Saved figure → {out_path}")
+            print(f"Saved figure → {fig_path}")
+
+    # ── Ranking CSV ──
+    ranking.sort(key=lambda t: t[1], reverse=True)
+    rank_df = pd.DataFrame(ranking, columns=["feature", f"avg_{args.metric}"])
+    rank_path = Path(args.rank_file) if args.rank_file else outdir / "feature_ranking.csv"
+    rank_df.to_csv(rank_path, index=False)
+
+    print("\nTop-ranked features by separation:")
+    print(rank_df.head(20).to_string(index=False))
+    print(f"\nSaved full ranking → {rank_path.resolve()}")
 
 
 if __name__ == "__main__":
