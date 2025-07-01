@@ -143,30 +143,40 @@ def main() -> None:
 
     counts = defaultdict(lambda: [0] * args.y_top)
 
-    # compare every unordered pair of list-files
-    for idx_a, idx_b in itertools.combinations(range(len(lists)), 2):
-        for json_a in lists[idx_a]:
-            for json_b in lists[idx_b]:
-                data_a = load_json(json_a)
-                data_b = load_json(json_b)
-                if data_a is None or data_b is None:
-                    continue  # skip if either file failed
+    from tqdm import tqdm
+    import itertools
 
-                ts_a, freq_a = data_a
-                ts_b, freq_b = data_b
+    # assume exactly two sub-lists ⇒ lists[0], lists[1]
+    list0, list1 = lists[0], lists[1]
+    total_pairs = len(list0) * len(list1)
 
-                ts_union = sorted(set(ts_a) | set(ts_b))
-                names = set(freq_a) | set(freq_b)
+    for json_a, json_b in tqdm(itertools.product(list0, list1),
+                            total=total_pairs,
+                            desc="Comparing JSON pairs"):
+    # # # compare every unordered pair of list-files
+    # # for idx_a, idx_b in itertools.combinations(range(len(lists)), 2):
+    #     for json_a in lists[idx_a]:
+    #         for json_b in lists[idx_b]:
+            data_a = load_json(json_a)
+            data_b = load_json(json_b)
+            if data_a is None or data_b is None:
+                continue  # skip if either file failed
 
-                dist_pairs = []
-                for name in names:
-                    seq_a = align(ts_union, ts_a, freq_a.get(name, [0]*len(ts_a)))
-                    seq_b = align(ts_union, ts_b, freq_b.get(name, [0]*len(ts_b)))
-                    dist_pairs.append((name, metric_fn(seq_a, seq_b)))
+            ts_a, freq_a = data_a
+            ts_b, freq_b = data_b
 
-                dist_pairs.sort(key=lambda t: t[1], reverse=True)
-                for r, (name, _) in enumerate(dist_pairs[:args.y_top]):
-                    counts[name][r] += 1
+            ts_union = sorted(set(ts_a) | set(ts_b))
+            names = set(freq_a) | set(freq_b)
+
+            dist_pairs = []
+            for name in names:
+                seq_a = align(ts_union, ts_a, freq_a.get(name, [0]*len(ts_a)))
+                seq_b = align(ts_union, ts_b, freq_b.get(name, [0]*len(ts_b)))
+                dist_pairs.append((name, metric_fn(seq_a, seq_b)))
+
+            dist_pairs.sort(key=lambda t: t[1], reverse=True)
+            for r, (name, _) in enumerate(dist_pairs[:args.y_top]):
+                counts[name][r] += 1
 
     # output
     cols = [f"rank_{i+1}" for i in range(args.y_top)]
