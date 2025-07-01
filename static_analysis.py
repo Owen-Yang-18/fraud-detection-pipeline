@@ -118,35 +118,38 @@ def main() -> None:
                  for c1, c2 in itertools.combinations(class_values, 2)]
         ranking.append((col, float(np.mean(dists))))
 
-        # Figure with subplots
+        # figure with subplots
         n_cls = len(class_values)
         ncols = min(n_cls, args.max_cols)
         nrows = math.ceil(n_cls / ncols)
         fig, axes = plt.subplots(nrows, ncols,
-                                 figsize=(4 * ncols, 3.5 * nrows),
+                                 figsize=(4*ncols, 3.5*nrows),
                                  squeeze=False)
         fig.suptitle(f"{col} — per-class distributions", fontsize=14)
 
         for i, cls in enumerate(class_values):
             r, c = divmod(i, ncols)
             ax = axes[r][c]
-            ax.hist(df.loc[df[class_col] == cls, col].dropna(), bins=bins if args.bins is None else args.bins)
-            ax.set_title(f"Class {cls}")
+            data_cls = df[df[class_col]==cls][col].dropna()
+            ax.hist(data_cls, bins=bins if args.bins is None else args.bins)
+            mu = stats.loc[cls, (col, 'mean')]
+            sig = stats.loc[cls, (col, 'std')]
+            ax.set_title(f"Class {cls}\nmu={mu:.3g}, sig={sig:.3g}")
             ax.set_xlabel(col)
             ax.set_ylabel("Freq")
 
-        # Hide unused subplots
-        for j in range(n_cls, nrows * ncols):
+        # hide empty subplots
+        for j in range(n_cls, nrows*ncols):
             axes[divmod(j, ncols)].axis("off")
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.tight_layout(rect=[0,0,1,0.95])
         if args.show:
             plt.show()
         else:
             fig_path = outdir / f"{col}.png"
             fig.savefig(fig_path, dpi=150)
             plt.close(fig)
-            print(f"Saved figure → {fig_path}")
+            print(f"Saved → {fig_path}")
 
     # ── Ranking CSV ──
     ranking.sort(key=lambda t: t[1], reverse=True)
