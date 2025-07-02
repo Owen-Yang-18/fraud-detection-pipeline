@@ -104,6 +104,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--y_top", type=int, default=3)
     p.add_argument("--top_n", type=int, default=10)
     p.add_argument("--outdir", default="results")
+    p.add_argument("--plot_top", type=int, default=5)
     return p.parse_args()
 
 
@@ -159,6 +160,85 @@ def main() -> None:
 
     if len(data_lists) < 2 or any(len(dl) == 0 for dl in data_lists[:2]):
         sys.exit("Nothing to compare after pre-loading valid JSON files.")
+
+    # --- user-configurable ---
+    plot_top = getattr(args, "plot_top", 5)           # add to CLI if desired
+    # -------------------------
+
+    metric_fn = _METRIC_FN[args.metric]
+    list0, list1 = data_lists[0], data_lists[1]
+    total_pairs = len(list0) * len(list1)
+
+    stats = defaultdict(lambda: {"sum": 0.0, "cnt": 0})
+
+    best_example: Dict[str, Dict[str, Any]] = {}
+
+    from tqdm import tqdm
+    for (pa, (ts_a, fr_a)), (pb, (ts_b, fr_b)) in tqdm(
+            itertools.product(list0, list1),
+            total=total_pairs,
+            desc="Comparing JSON pairs"):
+
+        ts_union = sorted(set(ts_a) | set(ts_b))
+        names = set(fr_a) | set(fr_b)
+
+        for name in names:
+            seq_a = align(ts_union, ts_a, fr_a.get(name, [0]*len(ts_a)))
+            seq_b = align(ts_union, ts_b, fr_b.get(name, [0]*len(ts_b)))
+            d = metric_fn(seq_a, seq_b)
+
+            s = stats[name]
+            s["sum"] += d
+            s["cnt"] += 1
+
+            be = best_example.get(name)
+            if be is None or d > be["d"]:
+                best_example[name] = {
+                    "d": d,
+                    "ts": ts_union,
+                    "seqA": seq_a,
+                    "seqB": seq_b,
+                    "pair": (pa, pb)
+                }
+
+    # ------------------------------------------------------------------
+    # GRAND RANK by average distance  +  CSV
+    # ------------------------------------------------------------------
+    rows = [(n, v["sum"] / v["cnt"]) for n, v in stats.items()]
+    rank_df = pd.DataFrame(rows, columns=["name", "avg_distance"])
+    rank_df.sort_values("avg_distance", ascending=False, inplace=True, ignore_index=True)
+
+    rank_csv = outdir / "name_avg_distance.csv"
+    rank_df.to_csv(rank_csv, index=False)
+    print(f"Saved grand ranking → {rank_csv}")
+
+    # ------------------------------------------------------------------
+    # PLOT  top-P names  (timestamps shifted so the first point is 0)
+    # ------------------------------------------------------------------
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+
+    for i, (name, avg_d) in rank_df.head(plot_top).iterrows():
+        be = best_example[name]
+        t0 = be["ts"][0]
+        ts_offset = [t - t0 for t in be["ts"]]     # start x-axis at 0
+        pa, pb = map(Path, be["pair"])
+
+        plt.figure(figsize=(10, 4))
+        plt.step(ts_offset, be["seqA"], where="post", label=f"A: {pa.name}")
+        plt.step(ts_offset, be["seqB"], where="post", label=f"B: {pb.name}")
+        plt.title(f"{name}  —  max-d={be['d']:.3g}   avg-d={avg_d:.3g}")
+        plt.xlabel("seconds (offset)")
+        plt.ylabel("frequency")
+        plt.legend()
+        plt.tight_layout()
+
+        fig_path = outdir / f"plot_{i+1}_{name}.png"
+        plt.savefig(fig_path, dpi=150)
+        plt.close()
+        print(f"Saved plot → {fig_path}")
+
+
 
     # ------------------------------------------------------------------
     # 2) PAIRWISE comparison using pre-loaded data
