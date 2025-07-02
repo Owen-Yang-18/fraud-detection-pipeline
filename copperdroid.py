@@ -126,21 +126,28 @@ class HeteroGraphSAGE(nn.Module):
         }, aggregate='sum')
         self.classify = nn.Linear(hidden_size, out_size)
 
+    # ---------- helpers -------------------------------------------------
+    @staticmethod
+    def _ew_kwargs(graph_or_block):
+        """Return {'rel_name': {'edge_weight': tensor}, ...}"""
+        return {
+            etype[1]: {'edge_weight': graph_or_block.edges[etype].data['edge_weight']}
+            for etype in graph_or_block.canonical_etypes
+        }
+
+    # ---------- minibatch training --------------------------------------
     def forward(self, blocks, x):
-        """Forward pass for minibatch training."""
-        h = self.conv1(blocks[0], x)
+        h = self.conv1(blocks[0], x, mod_kwargs=self._ew_kwargs(blocks[0]))
         h = {k: F.relu(v) for k, v in h.items()}
-        h = self.conv2(blocks[1], h)
+        h = self.conv2(blocks[1], h, mod_kwargs=self._ew_kwargs(blocks[1]))
         return self.classify(h['application'])
 
+    # ---------- full-graph inference ------------------------------------
     def inference(self, g, device):
-        """Full-graph inference for evaluation."""
-        # The embedding layer needs a dictionary mapping node type to node IDs.
-        x = self.embed({ntype: g.nodes(ntype).to(device) for ntype in g.ntypes})
-        # The graph convolutions can be performed on the full graph.
-        h = self.conv1(g, x)
+        x = self.embed({nt: g.nodes(nt).to(device) for nt in g.ntypes})
+        h = self.conv1(g, x, mod_kwargs=self._ew_kwargs(g))
         h = {k: F.relu(v) for k, v in h.items()}
-        h = self.conv2(g, h)
+        h = self.conv2(g, h, mod_kwargs=self._ew_kwargs(g))
         return self.classify(h['application'])
 
 
