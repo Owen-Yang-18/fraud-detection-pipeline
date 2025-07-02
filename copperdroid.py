@@ -103,6 +103,14 @@ def create_heterogeneous_graph(csv_path):
     # Add edge weights
     for etype, data in edge_freqs.items():
         g.edges[etype].data['frequency'] = data
+
+    from dglnn import EdgeWeightNorm
+    
+    # 3.  Normalise once for *all* edge types ───────────────────
+    normer = EdgeWeightNorm(norm='both')   # symmetric  D^{-½} A D^{-½}
+    for etype in g.canonical_etypes:
+        w = g.edges[etype].data['edge_weight']
+        g.edges[etype].data['edge_weight'] = normer(g, w, etype=etype)
         
     return g
 
