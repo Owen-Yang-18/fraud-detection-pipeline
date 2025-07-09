@@ -568,6 +568,12 @@ class HeteroGraphSAGE(nn.Module):
         out = self.classifier(h["application"])
         return out
     
+    def _encode(self, x_dict, eidx_dict, ew_dict):
+        h = self.conv1(x_dict, eidx_dict, edge_weight_dict=ew_dict)
+        h = {k: F.relu(v) for k, v in h.items()}
+        h = self.conv2(h, eidx_dict, edge_weight_dict=ew_dict)
+        return h
+
     def get_app_hidden(self, data: HeteroData, device):
         """Return h for *all* application nodes."""
         x = {nt: self.emb[nt].weight.to(device) for nt in data.node_types}
