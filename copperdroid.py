@@ -567,6 +567,12 @@ class HeteroGraphSAGE(nn.Module):
         h = self.conv2(h, edge_index_dict, edge_weight_dict=edge_weight_dict)
         out = self.classifier(h["application"])
         return out
+    
+    def get_app_hidden(self, data: HeteroData, device):
+        """Return h for *all* application nodes."""
+        x = {nt: self.emb[nt].weight.to(device) for nt in data.node_types}
+        h = self._encode(x, data.edge_index_dict, data.edge_weight_dict)
+        return h["application"]
 
     # ---------------------------------------------------------------
     def full_forward(self, data: HeteroData, device):
@@ -575,6 +581,30 @@ class HeteroGraphSAGE(nn.Module):
             for ntype, emb in self.embeddings.items()
         }
         return self.forward(x_dict, data.edge_index_dict, data.edge_weight_dict)
+    
+# ---------------------------------------------------------------------------
+# 5  Embedding visualisation (t‑SNE / UMAP)
+# ---------------------------------------------------------------------------
+from sklearn.manifold import TSNE
+
+def plot_embeddings(model: HeteroGraphSAGE, data: HeteroData, device, path: str, method="tsne"):
+    emb = model.get_app_hidden(data, device).cpu().numpy()
+    y = data["application"].y.cpu().numpy()
+
+    if method == "umap":
+        if not HAS_UMAP:
+            raise ImportError("pip install umap-learn for UMAP support")
+        reducer = umap.UMAP(n_components=2, random_state=0)
+    else:
+        reducer = TSNE(n_components=2, perplexity=30, init="pca", learning_rate="auto", random_state=0)
+    proj = reducer.fit_transform(emb)
+
+    plt.figure(figsize=(8,6))
+    cmap = plt.cm.get_cmap("tab10", y.max()+1)
+    for cls in range(y.max()+1):
+        idx = y==cls; plt.scatter(proj[idx,0], proj[idx,1], s=20, alpha=.75, color=cmap(cls), label=f"Class {cls}")
+    plt.axis("off"); plt.legend(title="Label", frameon=False); plt.tight_layout(); plt.savefig(path, dpi=300); plt.close()
+    print(f"Embeddings saved → {path}")
 
 
 # ---------------------------------------------------------------------------
