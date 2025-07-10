@@ -152,7 +152,7 @@ def make_fold_graph(base: HeteroData, kept_edges: dict[str, torch.Tensor]) -> He
 def edge_losses(h_dict,batch,lam=0.1,device="cpu"):
     bce=nn.BCEWithLogitsLoss(); mse=nn.MSELoss(); l_exist=l_mse=0.
     for et in [e for e in batch.edge_types if e[0]=="application"]:
-        ei=batch[et].edge_index.to(device); w=batch[et].edge_weight.to(device)
+        ei=batch[et].edge_index.to(device); w = batch[et].edge_weight[: ei.size(1)].to(device)  # shapes now match pos_pred
         src, dst = h_dict[et[0]][ei[0]], h_dict[et[2]][ei[1]]
         pair = torch.cat([src,dst],1)
         pos_log = batch.model.dec_exist(pair).squeeze(); pos_pred = batch.model.dec_weight(pair).squeeze()
@@ -209,3 +209,19 @@ def main(k=5):
 
 if __name__=="__main__":
     main()
+
+
+pareto = study.best_trials
+
+rmse = np.array([t.values[0] for t in pareto])
+auc  = np.array([t.values[1] for t in pareto])
+
+rmse_n = (rmse - rmse.min()) / (rmse.max() - rmse.min() + 1e-12)
+auc_n  = (auc.max() - auc   ) / (auc.max() - auc.min()  + 1e-12)
+
+best_idx = np.argmin(np.sqrt(rmse_n**2 + auc_n**2))  # distance-to-utopia
+best_trial = pareto[best_idx]
+
+print("Balanced champion → Trial", best_trial.number,
+      "(RMSE =", best_trial.values[0], ", AUC =", best_trial.values[1], ")")
+params = best_trial.params 
