@@ -138,3 +138,91 @@ for pt in os.listdir(pt_folder):
         print(f"Renamed {pt} → {new_name}")
     else:
         print(f"No class match for {pt}, skipping.")
+
+
+
+import os
+import torch
+import torch.nn.functional as F
+import numpy as np
+from torch_geometric.data import Data
+from torch_geometric_temporal.signal import DynamicGraphTemporalSignal
+from torch_geometric_temporal.nn.recurrent import GConvLSTM
+from torch_geometric.transforms import LaplacianLambdaMax
+
+# 1. Load your dynamic graphs (.pt files) and labels
+def load_graph_sequences(pt_folder, graph_labels, snapshot_interval=24*3600):
+    sequences = []
+    for pt_file, label in graph_labels.items():
+        data = torch.load(os.path.join(pt_folder, pt_file))
+        df = np.rec.fromarrays([
+            data.src.numpy(), data.dst.numpy(),
+            data.t.numpy(), data.msg.numpy()
+        ], names=['src','dst','t','w'])
+        df.sort(order='t')
+        times = np.unique(df['t'] // snapshot_interval)
+
+        edge_indices, edge_weights, features = [], [], []
+        for ti in times:
+            mask = (df['t'] // snapshot_interval) == ti
+            s, d = df['src'][mask], df['dst'][mask]
+            edge_indices.append(np.vstack([s, d]))
+            edge_weights.append(df['w'][mask])
+            nodes = np.unique(np.concatenate([s, d]))
+            N = nodes.max() + 1
+            features.append(np.ones((N, 1), dtype=float))
+
+        label_arr = [label] * len(times)
+        sequences.append(DynamicGraphTemporalSignal(
+            edge_indices, edge_weights, features, label_arr))
+    return sequences
+
+# 2. Model for per-sequence classification
+class SequenceGConvLSTM(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, K, num_classes):
+        super().__init__()
+        self.recurrent = GConvLSTM(in_channels, out_channels, K)
+        self.lin = torch.nn.Linear(out_channels, num_classes)
+
+    def forward(self, x_seq, edge_idx_seq, edge_w_seq, lambda_max):
+        H, C = None, None
+        for x, eidx, ew in zip(x_seq, edge_idx_seq, edge_w_seq):
+            H, C = self.recurrent(
+                x, eidx, ew, H=H, C=C, lambda_max=lambda_max)
+        hg = H.mean(dim=0, keepdim=True)
+        return self.lin(hg)
+
+# 3. Training pipeline
+pt_folder = "/path/to/pt"
+graph_labels = {"a.pt": 0, "b.pt": 1, ...}
+
+sequences = load_graph_sequences(pt_folder, graph_labels)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+model = SequenceGConvLSTM(in_channels=1, out_channels=16, K=3,
+                          num_classes=max(graph_labels.values()) + 1).to(device)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+lap = LaplacianLambdaMax()
+
+for epoch in range(1, 51):
+    total_loss = 0
+    for signal in sequences:
+        xs = [torch.tensor(x, dtype=torch.float).to(device)
+              for x in signal.features]
+        eidxs = [torch.tensor(e, dtype=torch.long).to(device)
+                 for e in signal.edge_indices]
+        ews = [torch.tensor(w, dtype=torch.float).to(device)
+               for w in signal.edge_weights]
+        lmax = lap(torch.tensor(eidxs[0]))['lambda_max'].to(device)
+
+        logits = model(xs, eidxs, ews, lambda_max=lmax)
+        y = torch.tensor([signal.targets[0]], dtype=torch.long).to(device)
+        loss = F.cross_entropy(logits, y)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch {epoch:02d}, Loss: {total_loss/len(sequences):.4f}")
+
