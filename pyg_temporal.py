@@ -96,3 +96,45 @@ if __name__ == "__main__":
     graphs = load_dynamic_graphs(folder)
     labels = [0 if "classA" in fname else 1 for fname in os.listdir(folder) if fname.endswith(".pt")]
     model = train_all(graphs, labels)
+
+
+import os
+
+# Load class-to-prefix mappings from .txt files
+class_prefixes = {}  # class_name -> set of file prefixes
+
+txt_folder = "/path/to/txt_folder"
+for fname in os.listdir(txt_folder):
+    if not fname.endswith(".txt"):
+        continue
+    class_name = os.path.splitext(fname)[0]  # filename without .txt
+    prefixes = set()
+    with open(os.path.join(txt_folder, fname), "r") as f:
+        for line in f:
+            prefix = line.strip().split(".json")[0]
+            prefixes.add(prefix)
+    class_prefixes[class_name] = prefixes
+
+# Rename .pt files with class prefix
+pt_folder = "/path/to/pt_folder"
+for pt in os.listdir(pt_folder):
+    if not pt.endswith(".pt"):
+        continue
+    prefix = os.path.splitext(pt)[0]
+    assigned = None
+    for cls, prefixes in class_prefixes.items():
+        if prefix in prefixes:
+            assigned = cls
+            break
+
+    if assigned:
+        src_path = os.path.join(pt_folder, pt)
+        new_name = f"{assigned}_{pt}"
+        dst_path = os.path.join(pt_folder, new_name)
+        # Optionally check for collisions
+        if os.path.exists(dst_path):
+            raise FileExistsError(f"{dst_path} already exists")
+        os.rename(src_path, dst_path)
+        print(f"Renamed {pt} → {new_name}")
+    else:
+        print(f"No class match for {pt}, skipping.")
