@@ -226,3 +226,44 @@ for epoch in range(1, 51):
         total_loss += loss.item()
     print(f"Epoch {epoch:02d}, Loss: {total_loss/len(sequences):.4f}")
 
+
+from typing import List, Tuple
+import numpy as np
+from torch_geometric_temporal.signal import DynamicGraphTemporalSignal
+
+def make_batches_grouped_by_length(
+    signals: List[DynamicGraphTemporalSignal],
+    lengths: List[int],
+    labels: List[int],
+    batch_size: int
+) -> Tuple[
+    List[List[DynamicGraphTemporalSignal]],
+    List[List[int]],
+    List[int]
+]:
+    # Sort indices by increasing length
+    idx_sorted = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    batches, batch_labels, batch_lengths = [], [], []
+
+    for i in range(0, len(signals), batch_size):
+        idx_batch = idx_sorted[i : i + batch_size]
+        # Determine min length in this batch
+        min_len = min(lengths[j] for j in idx_batch)
+        batch = []
+        lbls = []
+        for j in idx_batch:
+            sig = signals[j]
+            # Trim trailing snapshots beyond min_len
+            trimmed = DynamicGraphTemporalSignal(
+                edge_indices = sig.edge_indices[:min_len],
+                edge_weights = sig.edge_weights[:min_len],
+                features = sig.features[:min_len],
+                targets = sig.targets[:min_len]
+            )
+            batch.append(trimmed)
+            lbls.append(labels[j])
+        batches.append(batch)
+        batch_labels.append(lbls)
+        batch_lengths.append(min_len)
+
+    return batches, batch_labels, batch_lengths
