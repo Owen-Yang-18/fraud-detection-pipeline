@@ -267,3 +267,150 @@ def make_batches_grouped_by_length(
         batch_lengths.append(min_len)
 
     return batches, batch_labels, batch_lengths
+
+for epoch in range(1, num_epochs + 1):
+    total_loss = 0.0
+    for batch_signals, batch_lbls, batch_T in zip(signals_batches, labels_batches, lengths_per_batch):
+        B = len(batch_signals)
+
+        # Stack features: shape (B, T, N_max, F)
+        features = []
+        edge_idx = []
+        edge_w = []
+        Ns = []
+        for sig in batch_signals:
+            Ns.append(sig.features[0].shape[0])
+        N_max = max(Ns)
+
+        for sig in batch_signals:
+            # pad features to (T, N_max, F)
+            feat = torch.stack([torch.tensor(x, dtype=torch.float) for x in sig.features[:batch_T]], dim=0)
+            pad_N = N_max - feat.shape[1]
+            if pad_N > 0:
+                feat = torch.nn.functional.pad(feat, (0, 0, 0, pad_N))
+            features.append(feat)
+
+            # collect per-snapshot edges & weights trimmed to batch_T
+            edge_idx.append([torch.tensor(e, dtype=torch.long) for e in sig.edge_indices[:batch_T]])
+            edge_w.append([torch.tensor(w, dtype=torch.float) for w in sig.edge_weights[:batch_T]])
+
+        features = torch.stack(features, dim=0).to(device)  # (B, T, N_max, F)
+        edge_w = [[w.to(device) for w in seq] for seq in edge_w]
+        edge_idx = [[e.to(device) for e in seq] for seq in edge_idx]
+        y = torch.tensor(batch_lbls, dtype=torch.long).to(device)
+
+        # Compute lambda_max once (or individually if needed)
+        lmax = lap(edge_idx[0][0])['lambda_max'].to(device)
+
+        optimizer.zero_grad()
+        logits = model(features, edge_idx, edge_w, lambda_max=lmax)
+        loss = F.cross_entropy(logits, y)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+
+from typing import List, Tuple
+from torch_geometric_temporal.signal import DynamicGraphTemporalSignal
+
+def make_batches_grouped_by_length(
+    signals: List[DynamicGraphTemporalSignal],
+    lengths: List[int],
+    labels: List[int],
+    batch_size: int
+) -> Tuple[
+    List[List[DynamicGraphTemporalSignal]],
+    List[List[int]],
+    List[int]
+]:
+    # sort by length
+    idx_sorted = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    batches, batch_labels, batch_lengths = [], [], []
+
+    for i in range(0, len(signals), batch_size):
+        idx_batch = idx_sorted[i : i + batch_size]
+        min_len = min(lengths[j] for j in idx_batch)
+        batch, lbls = [], []
+        for j in idx_batch:
+            sig = signals[j]
+            trimmed = DynamicGraphTemporalSignal(
+                edge_indices=sig.edge_indices[:min_len],
+                edge_weights=sig.edge_weights[:min_len],
+                features=sig.features[:min_len],
+                targets=sig.targets[:min_len]
+            )
+            batch.append(trimmed)
+            lbls.append(labels[j])
+        batches.append(batch)
+        batch_labels.append(lbls)
+        batch_lengths.append(min_len)
+
+    return batches, batch_labels, batch_lengths
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.data import Batch
+from torch_geometric_temporal.nn.recurrent import GConvLSTM
+from torch_geometric.nn import global_mean_pool
+
+class HybridClassifier(nn.Module):
+    def __init__(self, in_channels, hidden_channels, K, lstm_hidden, num_classes):
+        super().__init__()
+        self.gc_lstm = GConvLSTM(in_channels, hidden_channels, K)
+        self.lstm = nn.LSTM(hidden_channels, lstm_hidden, batch_first=True)
+        self.lin = nn.Linear(lstm_hidden, num_classes)
+
+    def forward(self, batch_signals: List, batch_labels):
+        B = len(batch_signals)
+        T = len(batch_signals[0].edge_indices)
+        device = next(self.parameters()).device
+
+        # Collect per-time-step hidden vectors for each graph
+        h_seq = torch.zeros(B, T, self.gc_lstm.out_channels, device=device)
+
+        for t in range(T):
+            # Build a PyG mini-batch across B graphs at time t
+            data_list = []
+            for sig in batch_signals:
+                data_list.append(
+                    torch_geometric.data.Data(
+                        x=torch.tensor(sig.features[t], dtype=torch.float),
+                        edge_index=torch.tensor(sig.edge_indices[t], dtype=torch.long),
+                        edge_weight=torch.tensor(sig.edge_weights[t], dtype=torch.float)
+                    )
+                )
+            mini_batch = Batch.from_data_list(data_list).to(device)
+
+            # Run GConvLSTM step across batched graphs
+            H_out, _ = self.gc_lstm(
+                mini_batch.x, mini_batch.edge_index, mini_batch.edge_weight,
+                H=None, C=None, lambda_max=None
+            )
+            # pool node features to graph-level embedding
+            h_graph = global_mean_pool(H_out, mini_batch.batch)
+            h_seq[:, t, :] = h_graph
+
+        # Use PyTorch LSTM to process sequence of embeddings per graph
+        _, (h_last, _) = self.lstm(h_seq)
+        h_last = h_last.squeeze(0)  # shape [B, lstm_hidden]
+        return self.lin(h_last)
+
+
+model = HybridClassifier(in_channels=1, hidden_channels=16, K=3,
+                         lstm_hidden=32, num_classes=num_classes).to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+for epoch in range(1, num_epochs + 1):
+    total_loss = 0.0
+    for batch_signals, batch_labels, _ in zip(batches, labels_batches, batch_lengths):
+        logits = model(batch_signals, batch_labels)
+        y = torch.tensor(batch_labels, dtype=torch.long, device=logits.device)
+        loss = F.cross_entropy(logits, y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    print(f"Epoch {epoch:02d}, avg loss: {total_loss/len(batches):.4f}")
