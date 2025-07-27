@@ -414,3 +414,180 @@ for epoch in range(1, num_epochs + 1):
         optimizer.step()
         total_loss += loss.item()
     print(f"Epoch {epoch:02d}, avg loss: {total_loss/len(batches):.4f}")
+
+
+import os
+import torch
+import pickle
+import numpy as np
+import pandas as pd
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.data import Batch
+from torch_geometric_temporal.signal import DynamicHeteroGraphTemporalSignal
+from torch_geometric_temporal.nn.recurrent import HeteroGCLSTM
+from torch_geometric.nn import global_mean_pool
+
+# ─── 1. Load and invert mapping pickle ────────────────────────────────────
+def invert_mapping(pkl_path):
+    with open(pkl_path, 'rb') as f:
+        name_to_id = pickle.load(f)
+    id_to_name = {idx: name for name, idx in name_to_id.items()}
+    return id_to_name
+
+# ─── 2. Load .pt files and build sequences ─────────────────────────────────
+def load_sequences(pt_folder, mapping_pkl, k, node_type='node'):
+    id_to_name = invert_mapping(mapping_pkl)
+    sequences, labels = [], []
+    metadata = None
+
+    for fname in sorted(os.listdir(pt_folder)):
+        if not fname.endswith('.pt'):
+            continue
+        td = torch.load(os.path.join(pt_folder, fname))
+        src = td.src.numpy(); dst = td.dst.numpy()
+        t = td.t.numpy(); msg = td.msg.numpy()
+        times = np.unique(t)
+        T = len(times)
+        if T < k:
+            continue
+
+        edge_index_dicts, edge_weight_dicts = [], []
+        feature_dicts, target_dicts = [], []
+
+        all_nodes = np.unique(np.concatenate([src, dst]))
+        N = int(all_nodes.max()) + 1
+
+        for ti in times[-k:]:
+            mask = t == ti
+            s = src[mask]; d = dst[mask]; w = msg[mask]
+            ei = torch.tensor([s, d], dtype=torch.long)
+            ew = torch.tensor(w, dtype=torch.float)
+
+            # placeholder: you may build node features via CSV or other source
+            x_dict = {node_type: torch.ones((N, 1), dtype=torch.float)}  # or your actual features
+            # placeholder: target per node type, e.g. from td.y or external label source
+            y_arr = td.y.numpy() if hasattr(td, 'y') else np.zeros((N,), dtype=int)
+            y_dict = {node_type: torch.tensor(y_arr, dtype=torch.long)}
+
+            edge_index_dicts.append({(node_type, 'to', node_type): ei})
+            edge_weight_dicts.append({(node_type, 'to', node_type): ew})
+            feature_dicts.append(x_dict)
+            target_dicts.append(y_dict)
+
+        seq = DynamicHeteroGraphTemporalSignal(
+            edge_index_dicts, edge_weight_dicts,
+            feature_dicts, target_dicts
+        )
+        sequences.append(seq)
+        labels.append(0)  # placeholder: assign sequence label here
+        metadata = seq.metadata
+
+    return sequences, labels, metadata
+
+# ─── 3. Model definition ───────────────────────────────────────────────────
+class HeteroSeqClassifier(nn.Module):
+    def __init__(self,
+                 in_channels_dict,
+                 out_channels,
+                 metadata,
+                 num_classes,
+                 node_type='node'):
+        super().__init__()
+        self.gc = HeteroGCLSTM(in_channels_dict=in_channels_dict,
+                                out_channels=out_channels,
+                                metadata=metadata)
+        self.lin = nn.Linear(out_channels, num_classes)
+        self.node_type = node_type
+
+    def forward(self, batch_signals):
+        B = len(batch_signals)
+        k = len(batch_signals[0].feature_dicts)
+        device = next(self.parameters()).device
+        last_emb = torch.zeros(B, self.gc.out_channels, device=device)
+
+        for t in range(k):
+            data_list = [sig[t] for sig in batch_signals]
+            batch = Batch.from_data_list(data_list).to(device)
+
+            H_dict, _ = self.gc(batch.x_dict, batch.edge_index_dict)
+            h_nt = H_dict[self.node_type]
+            pooled = global_mean_pool(h_nt, batch.batch_dict[self.node_type])
+            last_emb = pooled
+
+        return self.lin(last_emb)
+
+# ─── 4. Training loop ──────────────────────────────────────────────────────
+def train(
+    pt_folder,
+    mapping_pkl,
+    k=5,
+    batch_size=4,
+    num_epochs=20,
+    lr=1e-3
+):
+    sequences, labels, metadata = load_sequences(pt_folder, mapping_pkl, k)
+    in_dict = {metadata[0]: 1}  # placeholder: your in_channels per node_type
+    num_classes = max(labels) + 1
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = HeteroSeqClassifier(in_dict, out_channels=16,
+                                metadata=metadata,
+                                num_classes=num_classes).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+
+    batches = [
+        sequences[i:i+batch_size]
+        for i in range(0, len(sequences), batch_size)
+    ]
+    label_batches = [
+        labels[i:i+batch_size]
+        for i in range(0, len(labels), batch_size)
+    ]
+
+    for epoch in range(1, num_epochs + 1):
+        total_loss = 0.0
+        model.train()
+        for batch_sigs, batch_lbls in zip(batches, label_batches):
+            logits = model(batch_sigs)
+            y = torch.tensor(batch_lbls, dtype=torch.long, device=device)
+            loss = F.cross_entropy(logits, y)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total_loss += loss.item()
+        print(f"Epoch {epoch:02d}, avg loss: {total_loss/len(batches):.4f}")
+
+    return model
+
+# ─── Example entry point ──────────────────────────────────────────────────
+if __name__ == "__main__":
+    pt_folder = "/path/to/pt"
+    mapping_pkl = "/path/to/map.pkl"
+    trained_model = train(pt_folder, mapping_pkl, k=5, batch_size=8, num_epochs=50)
+
+
+def forward(self, batch_signals):
+    B = len(batch_signals)
+    k = len(batch_signals[0].feature_dicts)
+    device = next(self.parameters()).device
+    h_dict, c_dict = None, None
+    final_embeddings = None
+
+    for t in range(k):
+        data_list = [sig[t] for sig in batch_signals]
+        batch = Batch.from_data_list(data_list).to(device)
+
+        h_dict, c_dict = self.gc(batch.x_dict,
+                                 batch.edge_index_dict,
+                                 H=h_dict, C=c_dict)
+
+        h_nt = h_dict[self.node_type]
+        pooled = global_mean_pool(h_nt, batch.batch_dict[self.node_type])
+
+        # allocate once
+        if final_embeddings is None:
+            final_embeddings = torch.zeros((B, self.gc.out_channels), device=device)
+        final_embeddings = pooled
+
+    return self.lin(final_embeddings)
