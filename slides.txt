@@ -159,3 +159,23 @@ Step 4: Aggregate L2 distances across all possible class combinations per featur
 High L2 Distance: Sequences exhibit distinct temporal patterns across classes
 Low L2 Distance: Similar execution timing regardless of malware type
 Ranking Criterion: Features with larger cross-class sequence differences = more classification value
+
+based on this dataset, i created a heterogeneous graph, where we have a type of node representing apks, another type for system call, another type for binder call, and another type for composite calls. for each apk node we create an edge to the system call, binder call or composite behavior node if in the csv file it makes at least one such call. the edge weight is the frequenceis in the csv. therefore, our ml goal is to perform node classification on the apk nodes. can you present this into a few bullet point for half a slide please.
+
+Graph Structure Design:
+
+4 Node Types: APK nodes, System call nodes, Binder call nodes, Composite behavior nodes
+Edge Creation: APK connects to behavior node if frequency ≥ 1 in CSV
+Edge Weights: Frequency values from CSV (behavioral occurrence counts)
+
+• Graph Properties:
+
+Heterogeneous: Multiple node types capture different aspects of malware behavior
+Weighted: Edge weights preserve frequency information for nuanced analysis
+Bipartite-like: APKs connect to behaviors, but behaviors don't interconnect
+
+• Machine Learning Task:
+
+Objective: Node classification on APK nodes (predict malware class)
+Input Features: Graph structure + edge weights encode APK-behavior relationships
+Output: 5-class prediction (Adware, Banking, SMS, Riskware, Benign)
