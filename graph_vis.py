@@ -300,3 +300,73 @@ if __name__ == "__main__":
     print("\n=== Node List by Type ===")
     for node_type, nodes in node_types.items():
         print(f"{node_type.replace('_', ' ').title()}: {nodes}")
+
+
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Sample data - 4 main categories (bigger bars), each with 4 subcategories (smaller bars)
+categories = ['Sales', 'Marketing', 'Engineering', 'Support']
+subcategories = ['Q1', 'Q2', 'Q3', 'Q4']
+
+# Sample values for each subcategory within each main category
+data = {
+    'Sales': [20, 35, 30, 25],
+    'Marketing': [25, 20, 15, 30], 
+    'Engineering': [30, 25, 35, 20],
+    'Support': [15, 30, 25, 35]
+}
+
+# Set up the plot
+fig, ax = plt.subplots(figsize=(12, 7))
+
+# Set the width of each bar and positions
+bar_width = 0.2
+x = np.arange(len(categories))
+
+# Define consistent colors for each subcategory (same color across all categories)
+colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12']  # Blue, Red, Green, Orange
+
+# Create bars for each subcategory - each subcategory keeps the same color across all categories
+for i, subcategory in enumerate(subcategories):
+    values = [data[category][i] for category in categories]
+    bars = ax.bar(x + i * bar_width, values, bar_width, 
+                  label=subcategory, color=colors[i], alpha=0.8, edgecolor='white', linewidth=0.5)
+    
+    # Add value labels on top of bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                f'{height}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+# Customize the plot
+ax.set_xlabel('Departments', fontsize=13, fontweight='bold')
+ax.set_ylabel('Performance Score', fontsize=13, fontweight='bold')
+ax.set_title('Quarterly Performance by Department\n(Each color represents the same quarter across departments)', 
+             fontsize=15, fontweight='bold', pad=20)
+
+# Set x-axis ticks and labels (center them between the grouped bars)
+ax.set_xticks(x + bar_width * 1.5)  # Center the labels
+ax.set_xticklabels(categories, fontsize=11)
+
+# Add legend with clear title - shows that each color represents the same quarter
+ax.legend(title='Quarters', loc='upper left', bbox_to_anchor=(1, 1), 
+          title_fontsize=12, fontsize=11, frameon=True, fancybox=True, shadow=True)
+
+# Add grid for better readability
+ax.grid(axis='y', alpha=0.3, linestyle='--')
+ax.set_axisbelow(True)
+
+# Set y-axis limits for better visualization
+ax.set_ylim(0, max([max(data[cat]) for cat in categories]) + 5)
+
+# Adjust layout to prevent legend cutoff
+plt.tight_layout()
+
+# Display the plot
+plt.show()
+
+print("✓ Plot created successfully!")
+print("✓ Each quarter (Q1, Q2, Q3, Q4) maintains the same color across all departments")
+print("✓ Legend shows the color coding for each quarter")
