@@ -1,0 +1,286 @@
+<svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="graphGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e3f2fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#bbdefb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lstmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f3e5f5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e1bee7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="hiddenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5e8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c8e6c9;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="embeddingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff8e1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffb74d;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="mlpGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5e8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a5d6a7;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.3)"/>
+    </filter>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="500" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">
+    LSTM Heterogeneous Graph Neural Network Architecture
+  </text>
+  
+  <!-- Sequence of Heterogeneous Graphs -->
+  <g transform="translate(20, 80)">
+    <rect x="0" y="0" width="280" height="120" rx="10" fill="url(#graphGrad)" stroke="#1976d2" stroke-width="2" filter="url(#shadow)"/>
+    <text x="140" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1976d2">
+      Sequence of Heterogeneous Graphs
+    </text>
+    
+    <!-- Graph 1 (t=1) -->
+    <g transform="translate(20, 40)">
+      <text x="30" y="0" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">t=1</text>
+      <circle cx="10" cy="20" r="6" fill="#1976d2" stroke="#0d47a1" stroke-width="1"/>
+      <text x="10" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">APP</text>
+      <circle cx="30" cy="20" r="6" fill="#4caf50" stroke="#2e7d32" stroke-width="1"/>
+      <text x="30" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">SYS</text>
+      <circle cx="50" cy="20" r="6" fill="#ff9800" stroke="#f57c00" stroke-width="1"/>
+      <text x="50" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">BIN</text>
+      <circle cx="30" cy="40" r="6" fill="#e91e63" stroke="#c2185b" stroke-width="1"/>
+      <text x="30" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">COM</text>
+      <!-- edges -->
+      <line x1="10" y1="20" x2="30" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="50" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="30" y2="40" stroke="#666" stroke-width="1"/>
+    </g>
+    
+    <!-- Graph 2 (t=2) -->
+    <g transform="translate(100, 40)">
+      <text x="30" y="0" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">t=2</text>
+      <circle cx="10" cy="20" r="6" fill="#1976d2" stroke="#0d47a1" stroke-width="1"/>
+      <text x="10" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">APP</text>
+      <circle cx="30" cy="20" r="6" fill="#4caf50" stroke="#2e7d32" stroke-width="1"/>
+      <text x="30" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">SYS</text>
+      <circle cx="50" cy="20" r="6" fill="#ff9800" stroke="#f57c00" stroke-width="1"/>
+      <text x="50" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">BIN</text>
+      <circle cx="30" cy="40" r="6" fill="#e91e63" stroke="#c2185b" stroke-width="1"/>
+      <text x="30" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">COM</text>
+      <!-- edges -->
+      <line x1="10" y1="20" x2="30" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="50" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="30" y2="40" stroke="#666" stroke-width="1"/>
+    </g>
+    
+    <!-- Graph 3 (t=3) with dots -->
+    <g transform="translate(180, 40)">
+      <text x="15" y="0" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">...</text>
+      <text x="10" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#666">...</text>
+      <text x="15" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#666">...</text>
+      <text x="20" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#666">...</text>
+    </g>
+    
+    <!-- Graph T (t=T) -->
+    <g transform="translate(220, 40)">
+      <text x="30" y="0" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">t=T</text>
+      <circle cx="10" cy="20" r="6" fill="#1976d2" stroke="#0d47a1" stroke-width="1"/>
+      <text x="10" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">APP</text>
+      <circle cx="30" cy="20" r="6" fill="#4caf50" stroke="#2e7d32" stroke-width="1"/>
+      <text x="30" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">SYS</text>
+      <circle cx="50" cy="20" r="6" fill="#ff9800" stroke="#f57c00" stroke-width="1"/>
+      <text x="50" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">BIN</text>
+      <circle cx="30" cy="40" r="6" fill="#e91e63" stroke="#c2185b" stroke-width="1"/>
+      <text x="30" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-size="4" fill="white" font-weight="bold">COM</text>
+      <!-- edges -->
+      <line x1="10" y1="20" x2="30" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="50" y2="20" stroke="#666" stroke-width="1"/>
+      <line x1="10" y1="20" x2="30" y2="40" stroke="#666" stroke-width="1"/>
+    </g>
+    
+    <text x="140" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">
+      Sequential input: G1, G2, ..., Gt (temporal graph sequence)
+    </text>
+  </g>
+  
+  <!-- Arrow 1 -->
+  <path d="M310 140 L360 140" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- LSTM HeteroConv Layers -->
+  <g transform="translate(370, 80)">
+    <rect x="0" y="0" width="240" height="120" rx="10" fill="url(#lstmGrad)" stroke="#7b1fa2" stroke-width="2" filter="url(#shadow)"/>
+    <text x="120" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#7b1fa2">
+      LSTM HeteroConv Layers
+    </text>
+    
+    <!-- LSTM layer (top) -->
+    <g transform="translate(20, 35)">
+      <!-- LSTM Cell 1 -->
+      <rect x="0" y="0" width="40" height="20" rx="3" fill="#ce93d8" stroke="#7b1fa2" stroke-width="1"/>
+      <text x="20" y="12" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#4a148c" font-weight="bold">LSTM</text>
+      <text x="20" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#666">t=1</text>
+      
+      <!-- LSTM Cell 2 -->
+      <rect x="60" y="0" width="40" height="20" rx="3" fill="#ce93d8" stroke="#7b1fa2" stroke-width="1"/>
+      <text x="80" y="12" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#4a148c" font-weight="bold">LSTM</text>
+      <text x="80" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#666">t=2</text>
+      
+      <!-- Dots -->
+      <text x="120" y="10" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">...</text>
+      
+      <!-- LSTM Cell T -->
+      <rect x="140" y="0" width="40" height="20" rx="3" fill="#ce93d8" stroke="#7b1fa2" stroke-width="1"/>
+      <text x="160" y="12" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#4a148c" font-weight="bold">LSTM</text>
+      <text x="160" y="-2" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#666">t=T</text>
+      
+      <!-- Arrow only between t=1 and t=2 -->
+      <path d="M42 10 L58 10" stroke="#7b1fa2" stroke-width="1" fill="none" marker-end="url(#arrowhead)"/>
+    </g>
+    
+    <!-- HeteroConv layer (bottom) -->
+    <g transform="translate(20, 60)">
+      <!-- HeteroConv Cell 1 -->
+      <rect x="0" y="0" width="40" height="20" rx="3" fill="#ffcc02" stroke="#f57600" stroke-width="1"/>
+      <text x="20" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="#f57600" font-weight="bold">HeteroConv</text>
+      <text x="20" y="15" text-anchor="middle" font-family="Arial, sans-serif" font-size="5" fill="#f57600">(4 relations)</text>
+      
+      <!-- HeteroConv Cell 2 -->
+      <rect x="60" y="0" width="40" height="20" rx="3" fill="#ffcc02" stroke="#f57600" stroke-width="1"/>
+      <text x="80" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="#f57600" font-weight="bold">HeteroConv</text>
+      <text x="80" y="15" text-anchor="middle" font-family="Arial, sans-serif" font-size="5" fill="#f57600">(4 relations)</text>
+      
+      <!-- Dots -->
+      <text x="120" y="10" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">...</text>
+      
+      <!-- HeteroConv Cell T -->
+      <rect x="140" y="0" width="40" height="20" rx="3" fill="#ffcc02" stroke="#f57600" stroke-width="1"/>
+      <text x="160" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="#f57600" font-weight="bold">HeteroConv</text>
+      <text x="160" y="15" text-anchor="middle" font-family="Arial, sans-serif" font-size="5" fill="#f57600">(4 relations)</text>
+    </g>
+    
+    <text x="120" y="95" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Sequential processing with memory
+    </text>
+    <text x="120" y="107" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Hidden states: h1, h2, ..., ht
+    </text>
+  </g>
+  
+  <!-- Arrow 2 -->
+  <path d="M620 140 L670 140" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Last Hidden State -->
+  <g transform="translate(680, 80)">
+    <rect x="0" y="0" width="180" height="120" rx="10" fill="url(#hiddenGrad)" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+    <text x="90" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2e7d32">
+      Last Hidden State
+    </text>
+    <text x="90" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#2e7d32">
+      hₜ
+    </text>
+    
+    <!-- Hidden state representation -->
+    <g transform="translate(20, 50)">
+      <rect x="0" y="0" width="140" height="12" fill="#66bb6a" rx="2"/>
+      <text x="70" y="8" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="white" font-weight="bold">
+        Final LSTM hidden state
+      </text>
+    </g>
+    
+    <text x="90" y="85" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Contains temporal information
+    </text>
+    <text x="90" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      from entire sequence
+    </text>
+  </g>
+  
+  <!-- Arrow 3 downward -->
+  <path d="M770 210 L770 280" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Application Node Embeddings -->
+  <g transform="translate(650, 290)">
+    <rect x="0" y="0" width="240" height="120" rx="10" fill="url(#embeddingGrad)" stroke="#ffa000" stroke-width="2" filter="url(#shadow)"/>
+    <text x="120" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#f57600">
+      Application Node
+    </text>
+    <text x="120" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#f57600">
+      Embeddings
+    </text>
+    
+    <!-- Application embedding from hidden state -->
+    <g transform="translate(20, 50)">
+      <rect x="0" y="0" width="160" height="12" fill="#1976d2" rx="2"/>
+      <text x="170" y="8" font-family="Arial, sans-serif" font-size="10" fill="#666">h_app</text>
+    </g>
+    
+    <text x="120" y="80" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Extract app embeddings from hₜ
+    </text>
+    <text x="120" y="95" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Contains temporal patterns
+    </text>
+  </g>
+  
+  <!-- Arrow 4 to the left -->
+  <path d="M640 350 L500 350" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- MLP Classifier -->
+  <g transform="translate(320, 290)">
+    <rect x="0" y="0" width="180" height="120" rx="10" fill="url(#mlpGrad)" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+    <text x="90" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2e7d32">
+      MLP Classifier
+    </text>
+    
+    <!-- MLP layers -->
+    <rect x="20" y="30" width="140" height="20" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="42" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="bold">
+      Linear + ReLU
+    </text>
+    
+    <rect x="20" y="55" width="140" height="20" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="67" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="bold">
+      Dropout
+    </text>
+    
+    <rect x="20" y="80" width="140" height="20" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="92" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#2e7d32" font-weight="bold">
+      Linear (Output)
+    </text>
+    
+    <text x="90" y="110" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Classification layers
+    </text>
+  </g>
+  
+  <!-- Arrow 5 to the left -->
+  <path d="M310 350 L200 350" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- App Classification -->
+  <g transform="translate(20, 290)">
+    <rect x="0" y="0" width="160" height="120" rx="10" fill="#ffebee" stroke="#d32f2f" stroke-width="2" filter="url(#shadow)"/>
+    <text x="80" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#d32f2f">
+      App Classification
+    </text>
+    <text x="80" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#666">
+      5 Classes:
+    </text>
+    <text x="80" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Benign
+    </text>
+    <text x="80" y="70" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Riskware
+    </text>
+    <text x="80" y="85" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Adware
+    </text>
+    <text x="80" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Banking
+    </text>
+    <text x="80" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • SMS
+    </text>
+  </g>
+</svg>

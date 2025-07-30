@@ -1,0 +1,255 @@
+<svg viewBox="0 0 950 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="graphGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e3f2fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#bbdefb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="heteroGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f3e5f5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e1bee7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="graphConvGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff3e0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffcc02;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="mlpGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5e8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a5d6a7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="embeddingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff8e1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffb74d;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.3)"/>
+    </filter>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="475" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">
+    Heterogeneous Graph Neural Network Architecture
+  </text>
+  
+  <!-- Input Heterogeneous Graph -->
+  <g transform="translate(20, 80)">
+    <rect x="0" y="0" width="240" height="120" rx="10" fill="url(#graphGrad)" stroke="#1976d2" stroke-width="2" filter="url(#shadow)"/>
+    <text x="120" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1976d2">
+      Heterogeneous Graph
+    </text>
+    
+    <!-- Four node types with labels -->
+    <circle cx="70" cy="50" r="8" fill="#1976d2" stroke="#0d47a1" stroke-width="2"/>
+    <text x="70" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="white" font-weight="bold">APP</text>
+    
+    <circle cx="120" cy="50" r="8" fill="#4caf50" stroke="#2e7d32" stroke-width="2"/>
+    <text x="120" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="white" font-weight="bold">SYS</text>
+    
+    <circle cx="150" cy="70" r="8" fill="#ff9800" stroke="#f57c00" stroke-width="2"/>
+    <text x="150" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="white" font-weight="bold">BIN</text>
+    
+    <circle cx="170" cy="50" r="8" fill="#e91e63" stroke="#c2185b" stroke-width="2"/>
+    <text x="170" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="white" font-weight="bold">COM</text>
+    
+    <!-- Edges showing app connections to all other types -->
+    <line x1="70" y1="50" x2="120" y2="50" stroke="#666" stroke-width="2"/>
+    <line x1="70" y1="50" x2="150" y2="70" stroke="#666" stroke-width="2"/>
+    <line x1="70" y1="50" x2="170" y2="50" stroke="#666" stroke-width="2"/>
+    
+    <text x="120" y="110" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">
+      Types: Application, Syscall, Binder, Composite
+    </text>
+  </g>
+  
+  <!-- Arrow 1 to right -->
+  <path d="M270 140 L320 140" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Layer 1: HeteroConv -->
+  <g transform="translate(330, 80)">
+    <rect x="0" y="0" width="200" height="120" rx="10" fill="url(#heteroGrad)" stroke="#7b1fa2" stroke-width="2" filter="url(#shadow)"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#7b1fa2">
+      Layer 1: HeteroConv
+    </text>
+    
+    <!-- GraphConv modules in 2x2 grid -->
+    <rect x="15" y="30" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="55" y="43" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="55" y="53" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, syscall)
+    </text>
+    
+    <rect x="105" y="30" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="145" y="43" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="145" y="53" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, binder)
+    </text>
+    
+    <rect x="15" y="65" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="55" y="78" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="55" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, composite)
+    </text>
+    
+    <rect x="105" y="65" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="145" y="78" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="145" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, app)
+    </text>
+    
+    <text x="100" y="110" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Message passing for each edge type
+    </text>
+  </g>
+  
+  <!-- Arrow 2 to right -->
+  <path d="M540 140 L580 140" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Layer 2: HeteroConv -->
+  <g transform="translate(590, 80)">
+    <rect x="0" y="0" width="200" height="120" rx="10" fill="url(#heteroGrad)" stroke="#7b1fa2" stroke-width="2" filter="url(#shadow)"/>
+    <text x="100" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#7b1fa2">
+      Layer 2: HeteroConv
+    </text>
+    
+    <!-- GraphConv modules in 2x2 grid -->
+    <rect x="15" y="30" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="55" y="43" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="55" y="53" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, syscall)
+    </text>
+    
+    <rect x="105" y="30" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="145" y="43" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="145" y="53" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, binder)
+    </text>
+    
+    <rect x="15" y="65" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="55" y="78" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="55" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, composite)
+    </text>
+    
+    <rect x="105" y="65" width="80" height="30" rx="5" fill="url(#graphConvGrad)" stroke="#f57600" stroke-width="1"/>
+    <text x="145" y="78" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#f57600" font-weight="bold">
+      GraphConv
+    </text>
+    <text x="145" y="88" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" fill="#f57600">
+      (app, app)
+    </text>
+    
+    <text x="100" y="110" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Message passing for each edge type
+    </text>
+  </g>
+  
+  <!-- Arrow 3 downward -->
+  <path d="M690 210 L690 290" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Application Embeddings -->
+  <g transform="translate(560, 300)">
+    <rect x="0" y="0" width="260" height="150" rx="10" fill="url(#embeddingGrad)" stroke="#ffa000" stroke-width="2" filter="url(#shadow)"/>
+    <text x="130" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#f57600">
+      Node Embeddings
+    </text>
+    
+    <!-- All node type embedding vectors -->
+    <g transform="translate(20, 35)">
+      <rect x="0" y="0" width="180" height="12" fill="#1976d2" rx="2"/>
+      <text x="185" y="8" font-family="Arial, sans-serif" font-size="10" fill="#666">h_app</text>
+      
+      <rect x="0" y="18" width="180" height="12" fill="#4caf50" rx="2"/>
+      <text x="185" y="26" font-family="Arial, sans-serif" font-size="10" fill="#666">h_syscall</text>
+      
+      <rect x="0" y="36" width="180" height="12" fill="#ff9800" rx="2"/>
+      <text x="185" y="44" font-family="Arial, sans-serif" font-size="10" fill="#666">h_binder</text>
+      
+      <rect x="0" y="54" width="180" height="12" fill="#e91e63" rx="2"/>
+      <text x="185" y="62" font-family="Arial, sans-serif" font-size="10" fill="#666">h_composite</text>
+    </g>
+    
+    <text x="130" y="115" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Extract application embeddings only for classification
+    </text>
+    <text x="130" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Rich node representations
+    </text>
+  </g>
+  
+  <!-- Arrow 4 to the left -->
+  <path d="M550 375 L480 375" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- MLP Classifier -->
+  <g transform="translate(280, 300)">
+    <rect x="0" y="0" width="180" height="150" rx="10" fill="url(#mlpGrad)" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+    <text x="90" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2e7d32">
+      MLP Classifier
+    </text>
+    
+    <!-- MLP layers -->
+    <rect x="20" y="30" width="140" height="25" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="45" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#2e7d32" font-weight="bold">
+      Linear + ReLU
+    </text>
+    
+    <rect x="20" y="60" width="140" height="25" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#2e7d32" font-weight="bold">
+      Dropout
+    </text>
+    
+    <rect x="20" y="90" width="140" height="25" rx="5" fill="#c8e6c9" stroke="#4caf50" stroke-width="1"/>
+    <text x="90" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#2e7d32" font-weight="bold">
+      Linear (Output)
+    </text>
+    
+    <text x="90" y="135" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">
+      Classification layers
+    </text>
+  </g>
+  
+  <!-- Arrow 5 to the left -->
+  <path d="M270 375 L200 375" stroke="#333" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- App Classification -->
+  <g transform="translate(20, 300)">
+    <rect x="0" y="0" width="160" height="150" rx="10" fill="#ffebee" stroke="#d32f2f" stroke-width="2" filter="url(#shadow)"/>
+    <text x="80" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#d32f2f">
+      App Classification
+    </text>
+    <text x="80" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#666">
+      5 Classes:
+    </text>
+    <text x="80" y="60" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Benign
+    </text>
+    <text x="80" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Riskware
+    </text>
+    <text x="80" y="90" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Adware
+    </text>
+    <text x="80" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • Banking
+    </text>
+    <text x="80" y="120" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#333">
+      • SMS
+    </text>
+  </g>
+</svg>
