@@ -12,3 +12,56 @@ Background: B.S. in Computer Science from Emory University
 Publications: 5+ papers at top-tier conferences (KDD, CHIL, PSB, BHI)
 Experience: Teaching Assistant for databases and algorithms courses
 Currently seeking: Summer 2025 internship opportunities in data science/ML
+
+
+
+
+Dataset Scale & Timeline:
+
+17,341 total Android samples collected from December 2017 - December 2018
+13,077 samples successfully analyzed dynamically
+11,598 samples in final processed dataset
+
+
+Data Sources: Multi-source collection approach
+
+VirusTotal service, Contagio security blog, AMD, MalDozer
+Additional datasets from recent research contributions
+
+
+Malware Categories (5 distinct types):
+
+Adware: Hidden advertising in legitimate apps, continuous pop-ups
+Banking Malware: Trojan-based, mimics banking apps to steal credentials
+SMS Malware: Exploits SMS services for C&C communication and data theft
+Riskware: Legitimate programs exploitable by malicious users
+Benign: Non-malicious applications verified through VirusTotal
+
+
+Final Dataset Distribution:
+
+Adware: 1,253 samples | Banking: 2,100 samples | SMS: 3,904 samples
+Riskware: 2,546 samples | Benign: 1,795 samples
+
+
+Analysis Methodology:
+
+Dynamic Analysis: CopperDroid VMI-based system for behavior reconstruction
+Static Analysis: Comprehensive feature extraction from APK files
+Network Analysis: PCAP traffic capture during execution
+
+
+Comprehensive Feature Sets:
+
+470 behavioral features: System calls, binder calls, composite behaviors
+139 system call features: Focused on system-level interactions
+50,621 static features: Permissions, APIs, intents, services, file types, obfuscation patterns
+
+
+Available Resources:
+
+Original APK files, JSON analysis logs, structured CSV feature files
+Publicly available for cybersecurity research and AI/ML applications
+
+
+Key Advantages: Most comprehensive static + dynamic feature coverage compared to existing public datasets
