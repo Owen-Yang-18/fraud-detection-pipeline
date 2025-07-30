@@ -137,3 +137,25 @@ Here's a concise explanation of the CSV structure and feature engineering approa
   - **Computational Efficiency:** Fewer features = smaller, faster models suitable for mobile devices
 
 **Key Insight:** Behavioral frequency patterns captured during dynamic analysis reveal class-specific signatures that enable robust malware classification.
+
+can you also explain how we select temporal features? basically we analyse, for each one of system call, binder call, and composite behavior, we analyze the sequence. we calculate the l2 difference across each apk from each pair of class. if two sequences are different, it means it is more useful for classification. can you write a similar style of bullet point for one slide? make it verbose and comprehensive.
+
+Temporal Feature Selection via Sequence Analysis
+• Temporal Sequence Extraction:
+
+Input: Dynamic execution logs capturing chronological order of behaviors
+Sequences: Time-ordered system calls, binder calls, and composite behaviors per APK
+Window: 2-minute recording captures complete malware execution patterns
+
+• Cross-Class Sequence Comparison Methodology:
+
+Step 1: Extract temporal sequences for each behavior type across all APK samples
+Step 2: Group sequences by malware class (Adware, Banking, SMS, Riskware, Benign)
+Step 3: Calculate L2 distance between sequence pairs from different classes
+Step 4: Aggregate L2 distances across all possible class combinations per feature
+
+• Feature Discriminability Assessment:
+
+High L2 Distance: Sequences exhibit distinct temporal patterns across classes
+Low L2 Distance: Similar execution timing regardless of malware type
+Ranking Criterion: Features with larger cross-class sequence differences = more classification value
