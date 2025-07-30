@@ -108,3 +108,32 @@ Distributed Processing: Parallel graph analysis across device clusters
 Automated Feature Selection: ML identifies most discriminative features from 50K+ static attributes
 
 Bottom Line: GNNs uniquely combine structural reasoning, multi-modal fusion, and scalable processing to achieve high-accuracy malware detection suitable for resource-constrained edge deployment.
+
+can you explain more on the csv file gathering the static feature. here each row in the csv is an apk, each column represent one of a system call, binder call, or composite behaviors. each cell in the csv represent the total number of time or frequencies an apk make such a call over the two minute recording time. also, explain how we do feature engineering. for each feature or for each column of the csv, we group hte row by their classes, and model their separate per class distribution of frequenceis. then we use jensen shannon divergence to calculate the pairwise distribution agreement across different classes. a feature is more helpful for classifcation or more distinguishing if cross class distribution have higher disagreement i.e., jesen shannon divergence. can you frame it into a bullet point that fit into at most half a slide? 
+
+Here's a concise explanation of the CSV structure and feature engineering approach:
+
+**Static Feature CSV Structure & Feature Engineering**
+
+**• CSV Data Format:**
+  - **Rows:** Individual APK samples (11,598 total)
+  - **Columns:** System calls, binder calls, and composite behaviors (470 features)
+  - **Cell Values:** Frequency counts of each behavior during 2-minute dynamic analysis
+
+**• Feature Engineering via Jensen-Shannon Divergence:**
+  - **Step 1:** Group APK samples by malware class (Adware, Banking, SMS, Riskware, Benign)
+  - **Step 2:** For each feature column, model frequency distribution per class
+  - **Step 3:** Calculate Jensen-Shannon divergence between all class distribution pairs
+  - **Step 4:** Higher JS divergence = more discriminative feature for classification
+
+**• Feature Selection Rationale:**
+  - **High Divergence Features:** Different malware classes exhibit distinct behavioral patterns
+  - **Low Divergence Features:** Similar frequency distributions across classes (less useful)
+  - **Automated Ranking:** JS divergence scores enable systematic feature importance ranking
+
+**• Benefits for ML Model:**
+  - **Dimensionality Reduction:** Focus on most distinguishing features for edge deployment
+  - **Class Separability:** Enhanced model performance through statistically validated feature selection
+  - **Computational Efficiency:** Fewer features = smaller, faster models suitable for mobile devices
+
+**Key Insight:** Behavioral frequency patterns captured during dynamic analysis reveal class-specific signatures that enable robust malware classification.
