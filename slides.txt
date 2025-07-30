@@ -1,0 +1,14 @@
+Ph.D. Student in Computer Science at Duke University (2nd year)
+
+Advised by Professor Jian Pei
+
+
+Research Focus: Multimodal data mining, data storytelling, and bioinformatics
+
+Current work: Automatic paradox discovery and pattern recognition in sparse data
+
+
+Background: B.S. in Computer Science from Emory University
+Publications: 5+ papers at top-tier conferences (KDD, CHIL, PSB, BHI)
+Experience: Teaching Assistant for databases and algorithms courses
+Currently seeking: Summer 2025 internship opportunities in data science/ML
