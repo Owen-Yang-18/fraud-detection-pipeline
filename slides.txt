@@ -260,3 +260,53 @@ Example Applications: "Which CVEs are linked to this attack pattern?" or "What C
 PyTorch Geometric: Train your heterogeneous GNN model for malware classification
 RDFox: Store threat intelligence and reasoning rules about attack patterns/CVEs
 Combined System: Background GNN detects malware → RDFox reasons about attack implications and defensive strategies
+
+
+import numpy as np
+from sklearn.metrics import (
+    precision_score, recall_score, f1_score,
+    multilabel_confusion_matrix, accuracy_score
+)
+
+def per_class_performance_line(y_true, y_pred):
+    """
+    y_true, y_pred: integer arrays for multi-class labels
+    Prints per class metrics in one line each.
+    """
+    classes = np.unique(np.concatenate([y_true, y_pred]))
+    mlcm = multilabel_confusion_matrix(y_true, y_pred, labels=classes)
+    results = []
+    for idx, cls in enumerate(classes):
+        tn, fp, fn, tp = mlcm[idx].ravel()
+        acc = (tp + tn) / (tp + tn + fp + fn) if (tp+tn+fp+fn)>0 else 0.0
+        prec = tp / (tp + fp) if (tp+fp)>0 else 0.0
+        rec = tp / (tp + fn) if (tp+fn)>0 else 0.0
+        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec)>0 else 0.0
+        tpr = rec
+        tnr = tn / (tn + fp) if (tn+fp)>0 else 0.0
+        fpr = fp / (fp + tn) if (fp+tn)>0 else 0.0
+        fnr = fn / (tp + fn) if (tp+fn)>0 else 0.0
+
+        line = (
+            f"class {cls} | "
+            f"accuracy={acc:.4f} | "
+            f"precision={prec:.4f} | "
+            f"recall={rec:.4f} | "
+            f"F1={f1:.4f} | "
+            f"TPR={tpr:.4f} | "
+            f"TNR={tnr:.4f} | "
+            f"FPR={fpr:.4f} | "
+            f"FNR={fnr:.4f}"
+        )
+        results.append(line)
+    return results
+
+# Example usage
+if __name__ == "__main__":
+    # Example ground truth and predictions (labels 0,1,2,...)
+    y_true = np.array([0, 1, 2, 2, 0, 1, 2, 0, 1])
+    y_pred = np.array([0, 2, 2, 2, 0, 0, 1, 0, 1])
+
+    results = per_class_performance_line(y_true, y_pred)
+    for line in results:
+        print(line)
