@@ -310,3 +310,84 @@ if __name__ == "__main__":
     results = per_class_performance_line(y_true, y_pred)
     for line in results:
         print(line)
+
+
+import networkx as nx
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+
+def plot_multipartite(
+    seed=42,
+    p_edge=0.001,
+    figsize=(12, 12),
+    save_path="multipartite_graph.png"
+):
+    random.seed(seed)
+    np.random.seed(seed)
+    G = nx.DiGraph()
+
+    # 1. Create node groups
+    blue = [f"b{i}" for i in range(11580)]
+    green = [f"g{i}" for i in range(170)]
+    yellow = [f"y{i}" for i in range(200)]
+    red = [f"r{i}" for i in range(100)]
+
+    # Assign bipartite group attribute if desired
+    # All blue nodes in set 0, others in set 1
+    G.add_nodes_from(blue, bipartite=0)
+    G.add_nodes_from(green + yellow + red, bipartite=1)
+
+    others = green + yellow + red
+
+    # 2. Add edges only between blue and others
+    for u in blue:
+        for v in others:
+            if random.random() < p_edge:
+                G.add_edge(u, v)
+
+    # 3. Layout — use bipartite layout for clarity
+    pos = {}
+    pos.update(nx.bipartite_layout(G, blue))
+    # For better separation, shift one set vertically or horizontally
+    for n in blue:
+        pos[n] = (pos[n][0], pos[n][1] + 0.1)
+    for n in others:
+        pos[n] = (pos[n][0], pos[n][1] - 0.1)
+
+    plt.figure(figsize=figsize)
+
+    # Draw node groups separately
+    nx.draw_networkx_nodes(
+        G, pos, nodelist=blue,
+        node_color="blue", node_shape="o",
+        node_size=20, label="blue circles"
+    )
+    nx.draw_networkx_nodes(
+        G, pos, nodelist=green,
+        node_color="green", node_shape="^",
+        node_size=50, label="green triangles"
+    )
+    nx.draw_networkx_nodes(
+        G, pos, nodelist=yellow,
+        node_color="goldenrod", node_shape="d",
+        node_size=50, label="yellow diamonds"
+    )
+    nx.draw_networkx_nodes(
+        G, pos, nodelist=red,
+        node_color="red", node_shape="s",
+        node_size=50, label="red squares"
+    )
+
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, alpha=0.3, arrows=False)
+
+    plt.axis("off")
+    plt.legend(scatterpoints=1, markerscale=2)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"Graph saved to {save_path}")
+
+if __name__ == "__main__":
+    plot_multipartite()
