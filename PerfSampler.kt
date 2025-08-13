@@ -189,3 +189,24 @@ class PerfSampler(
     }
 }
 
+perf?.stop()
+perf = PerfSampler(
+    onUpdate = { s ->
+        runOnUiThread {
+            ui.txtStats.text =
+                "CPU(all): ${"%.1f".format(s.cpuPctAllCores)}%  " +
+                "CPU(1): ${"%.1f".format(s.cpuPctOneCore)}%  " +
+                "PSS: ${"%.1f".format(s.pssMb)} MB (Δ${"%.1f".format(s.dPssMb)})  " +
+                "USS: ${"%.1f".format(s.ussMb)} MB (Δ${"%.1f".format(s.dUssMb)})"
+        }
+    },
+    onSummary = { sum ->
+        runOnUiThread {
+            ui.txtStats.append(
+                "\nΔPSS=${"%.1f".format(sum.dPssMb)} MB  peak=${"%.1f".format(sum.peakPssMb)} MB; " +
+                "ΔUSS=${"%.1f".format(sum.dUssMb)} MB  peak=${"%.1f".format(sum.peakUssMb)} MB"
+            )
+        }
+    }
+).also { it.start() }
+
