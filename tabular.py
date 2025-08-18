@@ -200,3 +200,460 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import optuna
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import (
+    accuracy_score, f1_score, recall_score, precision_score, 
+    confusion_matrix
+)
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+torch.manual_seed(42)
+
+class PyTorchMLP(nn.Module):
+    """PyTorch MLP with flexible architecture"""
+    def __init__(self, input_dim, hidden_dims, num_classes, dropout_rate=0.1):
+        super(PyTorchMLP, self).__init__()
+        
+        layers = []
+        prev_dim = input_dim
+        
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            prev_dim = hidden_dim
+        
+        layers.append(nn.Linear(prev_dim, num_classes))
+        self.network = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.network(x)
+
+def calculate_multiclass_metrics(y_true, y_pred, num_classes):
+    """Calculate TPR, TNR, FPR, FNR for multiclass classification"""
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Initialize metrics arrays
+    tpr = np.zeros(num_classes)
+    tnr = np.zeros(num_classes) 
+    fpr = np.zeros(num_classes)
+    fnr = np.zeros(num_classes)
+    
+    for i in range(num_classes):
+        # True Positives, False Positives, True Negatives, False Negatives for class i
+        tp = cm[i, i]
+        fp = np.sum(cm[:, i]) - tp
+        fn = np.sum(cm[i, :]) - tp
+        tn = np.sum(cm) - tp - fp - fn
+        
+        # Calculate metrics for class i
+        tpr[i] = tp / (tp + fn) if (tp + fn) > 0 else 0
+        tnr[i] = tn / (tn + fp) if (tn + fp) > 0 else 0
+        fpr[i] = fp / (fp + tn) if (fp + tn) > 0 else 0
+        fnr[i] = fn / (tp + fn) if (tp + fn) > 0 else 0
+    
+    return tpr, tnr, fpr, fnr
+
+def train_pytorch_model(model, train_loader, val_loader, num_epochs, learning_rate, device):
+    """Train PyTorch model and return validation accuracy"""
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    
+    model.train()
+    for epoch in range(num_epochs):
+        for batch_x, batch_y in train_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(batch_x)
+            loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+    
+    # Evaluate on validation set
+    model.eval()
+    val_predictions = []
+    val_targets = []
+    
+    with torch.no_grad():
+        for batch_x, batch_y in val_loader:
+            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            outputs = model(batch_x)
+            _, predicted = torch.max(outputs.data, 1)
+            val_predictions.extend(predicted.cpu().numpy())
+            val_targets.extend(batch_y.cpu().numpy())
+    
+    return accuracy_score(val_targets, val_predictions)
+
+def pytorch_objective(trial, X, y, num_classes, device, cv_folds=5):
+    """Optuna objective function for PyTorch MLP"""
+    # Suggest hyperparameters
+    num_layers = trial.suggest_int('num_layers', 1, 4)
+    hidden_dims = []
+    for i in range(num_layers):
+        hidden_dim = trial.suggest_int(f'hidden_dim_{i}', 32, 512)
+        hidden_dims.append(hidden_dim)
+    
+    dropout_rate = trial.suggest_float('dropout_rate', 0.0, 0.5)
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+    batch_size = trial.suggest_int('batch_size', 16, 128)
+    num_epochs = trial.suggest_int('num_epochs', 10, 50)
+    
+    # Cross-validation
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    scores = []
+    
+    for train_idx, val_idx in skf.split(X, y):
+        X_train_fold, X_val_fold = X[train_idx], X[val_idx]
+        y_train_fold, y_val_fold = y[train_idx], y[val_idx]
+        
+        # Create data loaders
+        train_dataset = TensorDataset(
+            torch.FloatTensor(X_train_fold), 
+            torch.LongTensor(y_train_fold)
+        )
+        val_dataset = TensorDataset(
+            torch.FloatTensor(X_val_fold), 
+            torch.LongTensor(y_val_fold)
+        )
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
+        # Create and train model
+        model = PyTorchMLP(X.shape[1], hidden_dims, num_classes, dropout_rate).to(device)
+        accuracy = train_pytorch_model(model, train_loader, val_loader, num_epochs, learning_rate, device)
+        scores.append(accuracy)
+    
+    return np.mean(scores)
+
+def sklearn_objective(trial, X, y, cv_folds=5):
+    """Optuna objective function for sklearn MLP"""
+    # Suggest hyperparameters
+    num_layers = trial.suggest_int('num_layers', 1, 4)
+    hidden_layer_sizes = []
+    for i in range(num_layers):
+        hidden_dim = trial.suggest_int(f'hidden_dim_{i}', 32, 512)
+        hidden_layer_sizes.append(hidden_dim)
+    
+    learning_rate = trial.suggest_float('learning_rate_init', 1e-5, 1e-2, log=True)
+    alpha = trial.suggest_float('alpha', 1e-6, 1e-2, log=True)
+    batch_size = trial.suggest_int('batch_size', 16, 128)
+    max_iter = trial.suggest_int('max_iter', 100, 500)
+    
+    # Cross-validation
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    scores = []
+    
+    for train_idx, val_idx in skf.split(X, y):
+        X_train_fold, X_val_fold = X[train_idx], X[val_idx]
+        y_train_fold, y_val_fold = y[train_idx], y[val_idx]
+        
+        # Create and train model
+        model = MLPClassifier(
+            hidden_layer_sizes=tuple(hidden_layer_sizes),
+            learning_rate_init=learning_rate,
+            alpha=alpha,
+            batch_size=batch_size,
+            max_iter=max_iter,
+            random_state=42,
+            early_stopping=True,
+            validation_fraction=0.1
+        )
+        
+        model.fit(X_train_fold, y_train_fold)
+        accuracy = model.score(X_val_fold, y_val_fold)
+        scores.append(accuracy)
+    
+    return np.mean(scores)
+
+def evaluate_model_cv(model, X, y, num_classes, model_type='sklearn', cv_folds=5, **model_kwargs):
+    """Evaluate model using cross-validation with comprehensive metrics"""
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    
+    fold_metrics = {
+        'accuracy': [], 'f1_macro': [], 'recall_macro': [], 'precision_macro': [],
+        'tpr': [], 'tnr': [], 'fpr': [], 'fnr': []
+    }
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    for fold, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+        print(f"Evaluating fold {fold + 1}/{cv_folds}...")
+        
+        X_train_fold, X_test_fold = X[train_idx], X[test_idx]
+        y_train_fold, y_test_fold = y[train_idx], y[test_idx]
+        
+        if model_type == 'pytorch':
+            # Create PyTorch model
+            pytorch_model = PyTorchMLP(
+                X.shape[1], 
+                model_kwargs['hidden_dims'], 
+                num_classes, 
+                model_kwargs.get('dropout_rate', 0.1)
+            ).to(device)
+            
+            # Train model
+            train_dataset = TensorDataset(
+                torch.FloatTensor(X_train_fold), 
+                torch.LongTensor(y_train_fold)
+            )
+            test_dataset = TensorDataset(
+                torch.FloatTensor(X_test_fold), 
+                torch.LongTensor(y_test_fold)
+            )
+            
+            train_loader = DataLoader(train_dataset, batch_size=model_kwargs.get('batch_size', 64), shuffle=True)
+            test_loader = DataLoader(test_dataset, batch_size=model_kwargs.get('batch_size', 64), shuffle=False)
+            
+            criterion = nn.CrossEntropyLoss()
+            optimizer = optim.Adam(pytorch_model.parameters(), lr=model_kwargs.get('learning_rate', 0.001))
+            
+            # Training
+            pytorch_model.train()
+            for epoch in range(model_kwargs.get('num_epochs', 50)):
+                for batch_x, batch_y in train_loader:
+                    batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+                    
+                    optimizer.zero_grad()
+                    outputs = pytorch_model(batch_x)
+                    loss = criterion(outputs, batch_y)
+                    loss.backward()
+                    optimizer.step()
+            
+            # Prediction
+            pytorch_model.eval()
+            y_pred = []
+            with torch.no_grad():
+                for batch_x, batch_y in test_loader:
+                    batch_x = batch_x.to(device)
+                    outputs = pytorch_model(batch_x)
+                    _, predicted = torch.max(outputs.data, 1)
+                    y_pred.extend(predicted.cpu().numpy())
+            
+        else:  # sklearn
+            sklearn_model = MLPClassifier(**model_kwargs, random_state=42)
+            sklearn_model.fit(X_train_fold, y_train_fold)
+            y_pred = sklearn_model.predict(X_test_fold)
+        
+        # Calculate metrics
+        accuracy = accuracy_score(y_test_fold, y_pred)
+        f1_macro = f1_score(y_test_fold, y_pred, average='macro')
+        recall_macro = recall_score(y_test_fold, y_pred, average='macro')
+        precision_macro = precision_score(y_test_fold, y_pred, average='macro')
+        
+        tpr, tnr, fpr, fnr = calculate_multiclass_metrics(y_test_fold, y_pred, num_classes)
+        
+        # Store metrics
+        fold_metrics['accuracy'].append(accuracy)
+        fold_metrics['f1_macro'].append(f1_macro)
+        fold_metrics['recall_macro'].append(recall_macro)
+        fold_metrics['precision_macro'].append(precision_macro)
+        fold_metrics['tpr'].append(np.mean(tpr))
+        fold_metrics['tnr'].append(np.mean(tnr))
+        fold_metrics['fpr'].append(np.mean(fpr))
+        fold_metrics['fnr'].append(np.mean(fnr))
+        
+        print(f"Fold {fold + 1} - Accuracy: {accuracy:.4f}, F1-Macro: {f1_macro:.4f}")
+    
+    # Calculate averages
+    avg_metrics = {}
+    for metric, values in fold_metrics.items():
+        avg_metrics[f'{metric}_mean'] = np.mean(values)
+        avg_metrics[f'{metric}_std'] = np.std(values)
+    
+    return avg_metrics, fold_metrics
+
+def main():
+    """Main function to run the complete pipeline"""
+    print("=== ML Pipeline with Feature Selection and Hyperparameter Tuning ===\n")
+    
+    # Load data files
+    print("1. Loading data...")
+    try:
+        # Replace with your actual file paths
+        data_df = pd.read_csv('your_data_file.csv')  # Replace with your data file path
+        ranking_df = pd.read_csv('your_ranking_file.csv')  # Replace with your ranking file path
+        
+        print(f"Data shape: {data_df.shape}")
+        print(f"Ranking shape: {ranking_df.shape}")
+    except FileNotFoundError:
+        print("Error: Please make sure your CSV files exist and update the file paths in the script.")
+        print("Expected files:")
+        print("- your_data_file.csv (with 'Class' column)")
+        print("- your_ranking_file.csv (with feature rankings)")
+        return
+    
+    # Prepare features and target
+    print("\n2. Preparing features and target...")
+    X = data_df.drop('Class', axis=1)
+    y = data_df['Class']
+    
+    # Encode labels if they're not numeric
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y)
+    num_classes = len(np.unique(y_encoded))
+    
+    print(f"Number of classes: {num_classes}")
+    print(f"Class distribution: {np.bincount(y_encoded)}")
+    
+    # Feature selection based on ranking
+    print("\n3. Selecting top 64 features...")
+    # Assuming ranking file has columns: 'feature' and 'ranking' (or similar)
+    # Adjust column names based on your ranking file structure
+    ranking_columns = ranking_df.columns.tolist()
+    print(f"Ranking file columns: {ranking_columns}")
+    
+    # You may need to adjust this based on your ranking file structure
+    # For example, if your ranking file has 'feature_name' and 'rank':
+    top_features = ranking_df.nsmallest(64, ranking_columns[1])[ranking_columns[0]].tolist()
+    
+    # Select features that exist in both datasets
+    available_features = [f for f in top_features if f in X.columns]
+    if len(available_features) < 64:
+        print(f"Warning: Only {len(available_features)} features available from ranking file")
+        available_features = X.columns.tolist()[:64]  # Fallback to first 64 features
+    else:
+        available_features = available_features[:64]
+    
+    X_selected = X[available_features]
+    print(f"Selected {X_selected.shape[1]} features")
+    
+    # Preprocessing
+    print("\n4. Preprocessing with MinMaxScaler...")
+    scaler = MinMaxScaler()
+    X_scaled = scaler.fit_transform(X_selected)
+    
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Hyperparameter tuning for PyTorch MLP
+    print("\n5. Hyperparameter tuning for PyTorch MLP...")
+    pytorch_study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler())
+    pytorch_study.optimize(
+        lambda trial: pytorch_objective(trial, X_scaled, y_encoded, num_classes, device),
+        n_trials=50
+    )
+    
+    print("Best PyTorch hyperparameters:")
+    for key, value in pytorch_study.best_params.items():
+        print(f"  {key}: {value}")
+    print(f"Best PyTorch CV score: {pytorch_study.best_value:.4f}")
+    
+    # Hyperparameter tuning for sklearn MLP
+    print("\n6. Hyperparameter tuning for sklearn MLP...")
+    sklearn_study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler())
+    sklearn_study.optimize(
+        lambda trial: sklearn_objective(trial, X_scaled, y_encoded),
+        n_trials=50
+    )
+    
+    print("Best sklearn hyperparameters:")
+    for key, value in sklearn_study.best_params.items():
+        print(f"  {key}: {value}")
+    print(f"Best sklearn CV score: {sklearn_study.best_value:.4f}")
+    
+    # Final evaluation with best hyperparameters
+    print("\n7. Final evaluation with 5-fold CV...")
+    
+    # Prepare PyTorch best parameters
+    pytorch_best = pytorch_study.best_params
+    pytorch_hidden_dims = []
+    for i in range(pytorch_best['num_layers']):
+        pytorch_hidden_dims.append(pytorch_best[f'hidden_dim_{i}'])
+    
+    pytorch_kwargs = {
+        'hidden_dims': pytorch_hidden_dims,
+        'dropout_rate': pytorch_best['dropout_rate'],
+        'learning_rate': pytorch_best['learning_rate'],
+        'batch_size': pytorch_best['batch_size'],
+        'num_epochs': pytorch_best['num_epochs']
+    }
+    
+    # Prepare sklearn best parameters
+    sklearn_best = sklearn_study.best_params
+    sklearn_hidden_dims = []
+    for i in range(sklearn_best['num_layers']):
+        sklearn_hidden_dims.append(sklearn_best[f'hidden_dim_{i}'])
+    
+    sklearn_kwargs = {
+        'hidden_layer_sizes': tuple(sklearn_hidden_dims),
+        'learning_rate_init': sklearn_best['learning_rate_init'],
+        'alpha': sklearn_best['alpha'],
+        'batch_size': sklearn_best['batch_size'],
+        'max_iter': sklearn_best['max_iter'],
+        'early_stopping': True,
+        'validation_fraction': 0.1
+    }
+    
+    # Evaluate PyTorch MLP
+    print("\n--- PyTorch MLP Results ---")
+    pytorch_avg_metrics, pytorch_fold_metrics = evaluate_model_cv(
+        None, X_scaled, y_encoded, num_classes, 'pytorch', **pytorch_kwargs
+    )
+    
+    # Evaluate sklearn MLP
+    print("\n--- Sklearn MLP Results ---")
+    sklearn_avg_metrics, sklearn_fold_metrics = evaluate_model_cv(
+        None, X_scaled, y_encoded, num_classes, 'sklearn', **sklearn_kwargs
+    )
+    
+    # Print comprehensive results
+    print("\n" + "="*80)
+    print("FINAL RESULTS SUMMARY")
+    print("="*80)
+    
+    metrics_names = ['accuracy', 'f1_macro', 'recall_macro', 'precision_macro', 'tpr', 'tnr', 'fpr', 'fnr']
+    
+    print("\nPyTorch MLP Results:")
+    print("-" * 50)
+    for metric in metrics_names:
+        mean_val = pytorch_avg_metrics[f'{metric}_mean']
+        std_val = pytorch_avg_metrics[f'{metric}_std']
+        print(f"{metric.upper():15s}: {mean_val:.4f} ± {std_val:.4f}")
+    
+    print("\nSklearn MLP Results:")
+    print("-" * 50)
+    for metric in metrics_names:
+        mean_val = sklearn_avg_metrics[f'{metric}_mean']
+        std_val = sklearn_avg_metrics[f'{metric}_std']
+        print(f"{metric.upper():15s}: {mean_val:.4f} ± {std_val:.4f}")
+    
+    print("\nFold-wise Results:")
+    print("-" * 50)
+    print("PyTorch MLP - Fold-wise Accuracy:", [f"{acc:.4f}" for acc in pytorch_fold_metrics['accuracy']])
+    print("Sklearn MLP - Fold-wise Accuracy:", [f"{acc:.4f}" for acc in sklearn_fold_metrics['accuracy']])
+    
+    # Compare models
+    pytorch_avg_acc = pytorch_avg_metrics['accuracy_mean']
+    sklearn_avg_acc = sklearn_avg_metrics['accuracy_mean']
+    
+    print(f"\nModel Comparison:")
+    print("-" * 50)
+    if pytorch_avg_acc > sklearn_avg_acc:
+        print(f"PyTorch MLP performs better: {pytorch_avg_acc:.4f} vs {sklearn_avg_acc:.4f}")
+    else:
+        print(f"Sklearn MLP performs better: {sklearn_avg_acc:.4f} vs {pytorch_avg_acc:.4f}")
+    
+    print("\nPipeline completed successfully!")
+
+if __name__ == "__main__":
+    main()
